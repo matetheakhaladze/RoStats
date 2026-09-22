@@ -90,7 +90,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'Team' && (
-        <Card title="Team members" subtitle="Pro plan includes 3 seats" right={<button className="btn btn-primary">Invite</button>}>
+        <Card title="Team members" subtitle="Pro plan includes team seats" right={<button className="btn btn-primary">Invite</button>}>
           <table className="table w-full">
             <thead><tr><th>Member</th><th>Role</th><th>Games</th><th>Status</th></tr></thead>
             <tbody>

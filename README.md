@@ -24,9 +24,8 @@ All data on the preview is mock data generated in `src/data/mock.ts`. Backend (D
 | `/#/app/monetization` | Monetization |
 | `/#/app/market` | Market Trends |
 | `/#/app/journey` | User Journey |
-| `/#/app/thumbnails` | Thumbnail Generator |
-| `/#/app/chatbot` | Chatbot Analytics |
-| `/#/app/assets` | Asset Generation |
+| `/#/app/art` | Art Generator |
+| `/#/app/chatbot` | Chatbot |
 | `/#/app/reports` | Reports & Export |
 | `/#/app/billing` | Subscription |
 | `/#/app/settings` | Settings |

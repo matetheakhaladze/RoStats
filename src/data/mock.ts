@@ -165,34 +165,16 @@ export const trendingKeywords = [
   { keyword: 'grow a garden', volume: 96, change: 41 },
 ]
 
-export const chatbotVolume = days.map((d, i) => ({
-  day: d,
-  conversations: [820, 910, 870, 960, 1210, 1580, 1490][i],
-  resolved: [690, 760, 720, 810, 1010, 1300, 1240][i],
-}))
-
-export const chatbotIntents = [
-  { intent: 'How to get coins', share: 24 },
-  { intent: 'Report a bug', share: 19 },
-  { intent: 'Trade help', share: 16 },
-  { intent: 'Codes / rewards', share: 15 },
-  { intent: 'Lost items', share: 12 },
-  { intent: 'Other', share: 14 },
-]
-
-export const chatbotTranscripts = [
-  { user: 'xX_Blaze_Xx', msg: 'how do i unlock the neon zone??', intent: 'Progression', sentiment: 'neutral', time: '2 min ago' },
-  { user: 'lunaplays', msg: 'my pet disappeared after trade pls help', intent: 'Lost items', sentiment: 'negative', time: '6 min ago' },
-  { user: 'kaiTheBuilder', msg: 'any new codes this week?', intent: 'Codes', sentiment: 'positive', time: '11 min ago' },
-  { user: 'mia_042', msg: 'thanks the bot fixed my daily reward', intent: 'Rewards', sentiment: 'positive', time: '19 min ago' },
-]
-
-export const assets = [
-  { name: 'Lava cave floor', type: 'Texture', size: '1024x1024', created: 'Today', status: 'Ready' },
-  { name: 'Ancient sword', type: 'Mesh', size: '4.2k tris', created: 'Today', status: 'Ready' },
-  { name: 'Coin pickup SFX', type: 'Audio', size: '0.8s', created: 'Yesterday', status: 'Ready' },
-  { name: 'Portal shader', type: 'Material', size: 'PBR', created: 'Yesterday', status: 'Processing' },
-  { name: 'Boss idle anim', type: 'Animation', size: '2.4s', created: '2 days ago', status: 'Ready' },
+// Games that have not launched yet but are already picking up attention
+// (wishlists, Discord members, teaser views, creator followers).
+export const upcomingGames = [
+  { name: 'Skyline Heist', studio: 'Vantage Games', genre: 'Heist', launch: 'Oct 3, 2026', signals: 96, discord: '48K', teaserViews: '2.1M', trend: 38 },
+  { name: 'Grow a Kingdom', studio: 'Sprout Labs', genre: 'Simulator', launch: 'Oct 10, 2026', signals: 91, discord: '61K', teaserViews: '1.7M', trend: 29 },
+  { name: 'Backrooms: Level 0', studio: 'Nullspace', genre: 'Horror', launch: 'Oct 17, 2026', signals: 84, discord: '22K', teaserViews: '940K', trend: 44 },
+  { name: 'Anime Clash Arena', studio: 'Kaiju Works', genre: 'Fighting', launch: 'Oct 24, 2026', signals: 82, discord: '35K', teaserViews: '1.2M', trend: 17 },
+  { name: 'Pet Planet', studio: 'Bloom Studio', genre: 'Simulator', launch: 'Nov 2026', signals: 74, discord: '19K', teaserViews: '610K', trend: 12 },
+  { name: 'Ghost Ship Tycoon', studio: 'Driftwood', genre: 'Tycoon', launch: 'Nov 2026', signals: 68, discord: '11K', teaserViews: '380K', trend: 21 },
+  { name: 'Neon Drift 2', studio: 'Redline', genre: 'Racing', launch: 'Dec 2026', signals: 55, discord: '8K', teaserViews: '210K', trend: -4 },
 ]
 
 export const invoices = [

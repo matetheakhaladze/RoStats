@@ -1,17 +1,17 @@
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Bell } from 'lucide-react'
 import { PageHeader, Card, Stat, Badge, Progress, chartTooltip, axisStyle } from '../components/ui'
-import { marketGenres, marketTrend, trendingKeywords } from '../data/mock'
+import { marketTrend, trendingKeywords, upcomingGames } from '../data/mock'
 
 export default function Market() {
   return (
     <div>
-      <PageHeader title="Market Trends" subtitle="What is growing on the platform right now" actions={<Badge tone="accent">Updated hourly</Badge>} />
+      <PageHeader title="Market Trends" subtitle="What is growing on the platform and what is about to launch" actions={<Badge tone="accent">Updated hourly</Badge>} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Platform CCU" value="6.4M" change={3.2} hint="concurrent players" />
         <Stat label="Fastest genre" value="Horror" change={21.7} hint="CCU growth, 30d" />
-        <Stat label="New games / day" value="4,120" change={-2.1} />
+        <Stat label="Upcoming launches" value="38" hint="tracked, next 90 days" />
         <Stat label="Your genre rank" value="#14" change={6} hint="Obby, by CCU" />
       </div>
 
@@ -52,24 +52,30 @@ export default function Market() {
       </div>
 
       <div className="mt-4">
-        <Card title="Genre comparison" subtitle="Live concurrent players and 30-day growth">
+        <Card title="Upcoming games" subtitle="Not launched yet, ranked by hype: wishlists, Discord growth, teaser views and creator followers">
           <table className="table w-full">
-            <thead><tr><th>Genre</th><th className="text-right">CCU</th><th className="text-right">Games</th><th className="text-right">CCU per game</th><th className="text-right">30d growth</th><th>Opportunity</th></tr></thead>
+            <thead><tr><th>Game</th><th>Genre</th><th>Launch</th><th>Hype score</th><th className="text-right">Discord</th><th className="text-right">Teaser views</th><th className="text-right">7d trend</th><th></th></tr></thead>
             <tbody>
-              {marketGenres.map((g) => {
-                const perGame = Math.round(g.ccu / g.games)
-                const opp = g.growth > 15 && perGame > 150 ? 'High' : g.growth > 5 ? 'Medium' : 'Low'
-                return (
-                  <tr key={g.genre}>
-                    <td className="font-medium">{g.genre}</td>
-                    <td className="text-right">{g.ccu.toLocaleString()}</td>
-                    <td className="text-right text-muted">{g.games.toLocaleString()}</td>
-                    <td className="text-right">{perGame}</td>
-                    <td className={`text-right ${g.growth >= 0 ? 'text-good' : 'text-bad'}`}>{g.growth > 0 ? '+' : ''}{g.growth}%</td>
-                    <td><Badge tone={opp === 'High' ? 'good' : opp === 'Medium' ? 'warn' : 'neutral'}>{opp}</Badge></td>
-                  </tr>
-                )
-              })}
+              {upcomingGames.map((g) => (
+                <tr key={g.name}>
+                  <td>
+                    <div className="font-medium">{g.name}</div>
+                    <div className="text-xs text-muted">{g.studio}</div>
+                  </td>
+                  <td><Badge tone={g.genre === 'Obby' ? 'accent' : 'neutral'}>{g.genre}</Badge></td>
+                  <td className="text-muted">{g.launch}</td>
+                  <td>
+                    <div className="flex items-center gap-2 w-32">
+                      <Progress value={g.signals} tone={g.signals >= 85 ? 'good' : g.signals >= 70 ? 'accent' : 'warn'} />
+                      <span className="text-xs">{g.signals}</span>
+                    </div>
+                  </td>
+                  <td className="text-right">{g.discord}</td>
+                  <td className="text-right">{g.teaserViews}</td>
+                  <td className={`text-right ${g.trend >= 0 ? 'text-good' : 'text-bad'}`}>{g.trend > 0 ? '+' : ''}{g.trend}%</td>
+                  <td className="text-right"><button className="btn px-2 py-1 text-xs"><Bell size={12} />Watch</button></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </Card>

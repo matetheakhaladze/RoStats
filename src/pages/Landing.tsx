@@ -7,14 +7,13 @@ const features = [
   { icon: Server, title: 'Live server health', text: 'CPU, memory, ping and FPS per server with crash logs pulled straight from your scripts.' },
   { icon: Coins, title: 'Monetization insights', text: 'Revenue by product, purchase funnels, ARPPU and LTV so you know exactly what sells.' },
   { icon: Route, title: 'User journey maps', text: 'See where players drop off between the tutorial, the lobby and the first purchase.' },
-  { icon: Image, title: 'AI thumbnail generator', text: 'Generate and A/B test thumbnails and icons that match the styles trending on the platform.' },
-  { icon: MessageSquare, title: 'In-game chatbot analytics', text: 'Track what players ask your support bot, sentiment, and resolution rate.' },
+  { icon: Image, title: 'Art generator', text: 'Turn a Studio screenshot into cartoon or anime thumbnails, icons and vectors, then test how they stand out on the Roblox home menu.' },
+  { icon: MessageSquare, title: 'Chatbot that knows your data', text: 'Ask why revenue dropped, which server is lagging, or have it write your next Discord update.' },
 ]
 
 const plans = [
-  { name: 'Free', price: '$0', desc: 'For your first experience', items: ['1 game', '7-day data history', 'Basic dashboards'] },
-  { name: 'Pro', price: '$29', desc: 'For growing studios', items: ['10 games', '1-year history', 'AI tools', 'Scheduled reports'], featured: true },
-  { name: 'Studio', price: '$99', desc: 'For teams shipping at scale', items: ['Unlimited games', 'Unlimited history', 'Team seats', 'API access'] },
+  { name: 'Free', price: '$0', desc: 'For your first experience', items: ['1 game', '7-day data history', 'Basic dashboards', 'No AI tools'] },
+  { name: 'Pro', price: '$29', desc: 'Full access to everything', items: ['Unlimited games', 'Full data history', 'Art Generator and Chatbot', '100 credits every month', 'Reports, exports, API'], featured: true },
 ]
 
 export default function Landing() {
@@ -91,8 +90,8 @@ export default function Landing() {
 
       <section id="pricing" className="mx-auto max-w-6xl px-6 py-16">
         <h2 className="text-2xl font-semibold">Simple pricing</h2>
-        <p className="mt-2 text-muted">Start free. Upgrade when your experience does.</p>
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
+        <p className="mt-2 text-muted">Start free. Upgrade when your experience does. Extra image credits can be bought any time, from $5 for 50.</p>
+        <div className="mt-10 grid gap-4 md:grid-cols-2 max-w-3xl">
           {plans.map((p) => (
             <div key={p.name} className={`card p-6 ${p.featured ? 'border-accent' : ''}`}>
               <div className="flex items-center justify-between">

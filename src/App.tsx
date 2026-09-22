@@ -6,9 +6,8 @@ import Players from './pages/Players'
 import Performance from './pages/Performance'
 import Monetization from './pages/Monetization'
 import Market from './pages/Market'
-import Thumbnails from './pages/Thumbnails'
+import ArtGenerator from './pages/ArtGenerator'
 import Chatbot from './pages/Chatbot'
-import Assets from './pages/Assets'
 import SettingsPage from './pages/Settings'
 import Billing from './pages/Billing'
 import Reports from './pages/Reports'
@@ -25,9 +24,8 @@ export default function App() {
           <Route path="performance" element={<Performance />} />
           <Route path="monetization" element={<Monetization />} />
           <Route path="market" element={<Market />} />
-          <Route path="thumbnails" element={<Thumbnails />} />
+          <Route path="art" element={<ArtGenerator />} />
           <Route path="chatbot" element={<Chatbot />} />
-          <Route path="assets" element={<Assets />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="billing" element={<Billing />} />
           <Route path="reports" element={<Reports />} />

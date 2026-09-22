@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Activity, Coins, TrendingUp, Image, MessageSquare,
-  Boxes, Settings, CreditCard, FileText, Route, Search, Bell, Menu, X, ChevronDown,
+  Settings, CreditCard, FileText, Route, Search, Bell, Menu, X, ChevronDown,
 } from 'lucide-react'
 import { games } from '../data/mock'
 
@@ -16,9 +16,8 @@ const nav = [
     { to: '/app/journey', label: 'User Journey', icon: Route },
   ]},
   { section: 'AI Tools', items: [
-    { to: '/app/thumbnails', label: 'Thumbnail Generator', icon: Image },
-    { to: '/app/chatbot', label: 'Chatbot Analytics', icon: MessageSquare },
-    { to: '/app/assets', label: 'Asset Generation', icon: Boxes },
+    { to: '/app/art', label: 'Art Generator', icon: Image },
+    { to: '/app/chatbot', label: 'Chatbot', icon: MessageSquare },
   ]},
   { section: 'Account', items: [
     { to: '/app/reports', label: 'Reports & Export', icon: FileText },
@@ -80,7 +79,7 @@ export default function Layout() {
       <div className="border-t border-line p-4">
         <div className="card p-3 bg-panel-2">
           <div className="text-xs text-muted">Pro plan</div>
-          <div className="text-sm font-medium mt-0.5">4 of 10 games tracked</div>
+          <div className="text-sm font-medium mt-0.5">62 credits left</div>
           <Link to="/app/billing" className="text-xs text-accent mt-1 inline-block">Manage plan</Link>
         </div>
       </div>
