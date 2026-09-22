@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send, Sparkles, Plus, MessageSquare } from 'lucide-react'
 import { PageHeader, Badge } from '../components/ui'
+import { chat as apiChat } from '../lib/api'
 
 type Msg = { role: 'user' | 'bot'; text: string }
 
@@ -29,26 +30,40 @@ function reply(q: string): string {
 
 export default function Chatbot() {
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: 'bot', text: 'Hi Mate. I have access to all four of your experiences. Ask me anything about players, revenue, servers, or ask me to write an update for your community.' },
+    { role: 'bot', text: 'Hi. Paste your numbers from Creator Dashboard on the left, then ask me anything about them, or ask me to write an update for your community.' },
   ])
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
+  const [context, setContext] = useState('')
+  const [live, setLive] = useState<boolean | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs, typing])
 
-  const send = (text: string) => {
+  const send = async (text: string) => {
     const q = text.trim()
     if (!q || typing) return
-    setMsgs((m) => [...m, { role: 'user', text: q }])
+    const next: Msg[] = [...msgs, { role: 'user', text: q }]
+    setMsgs(next)
     setInput('')
     setTyping(true)
-    setTimeout(() => { setMsgs((m) => [...m, { role: 'bot', text: reply(q) }]); setTyping(false) }, 900)
+    try {
+      const history = next.slice(1).map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
+      const r = await apiChat(history, context || undefined)
+      setMsgs((m) => [...m, { role: 'bot', text: r.reply }])
+      setLive(true)
+    } catch {
+      // Backend or API key not available: fall back to the demo answers.
+      setMsgs((m) => [...m, { role: 'bot', text: reply(q) }])
+      setLive(false)
+    } finally {
+      setTyping(false)
+    }
   }
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Chatbot" subtitle="Ask about your games in plain language" actions={<Badge tone="good">Connected to 4 games</Badge>} />
+      <PageHeader title="Chatbot" subtitle="Ask about your games in plain language" actions={<Badge tone={live === false ? 'warn' : 'good'}>{live === false ? 'Demo answers (API key missing)' : live ? 'Live' : 'Ready'}</Badge>} />
 
       <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-4">
         <div className="hidden lg:flex flex-col card p-3">
@@ -59,7 +74,14 @@ export default function Chatbot() {
               <button key={h} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted hover:bg-panel-2 hover:text-text"><MessageSquare size={14} className="shrink-0" /><span className="truncate">{h}</span></button>
             ))}
           </div>
-          <div className="mt-auto rounded-lg border border-line bg-bg p-3 text-xs text-muted">The bot only sees your own analytics data. Nothing is shared with other studios.</div>
+          <div className="mt-4 text-[11px] font-medium uppercase tracking-wider text-muted px-1">Your stats</div>
+          <textarea
+            className="input mt-1 h-40 resize-none text-xs"
+            placeholder="Paste numbers from Creator Dashboard here (visits, revenue, retention, sessions). The bot uses them to answer."
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+          />
+          <div className="mt-auto rounded-lg border border-line bg-bg p-3 text-xs text-muted">Only what you paste here is sent to the bot. Nothing is shared with other studios.</div>
         </div>
 
         <div className="card flex min-h-[520px] flex-col lg:col-span-3">
