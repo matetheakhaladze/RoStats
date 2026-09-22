@@ -5,6 +5,7 @@ import {
   Settings, CreditCard, FileText, Route, Search, Bell, Menu, X, ChevronDown,
 } from 'lucide-react'
 import { games } from '../data/mock'
+import logoUrl from '../assets/logo.png'
 
 const nav = [
   { section: 'Analytics', items: [
@@ -29,12 +30,7 @@ const nav = [
 export function Logo({ size = 28 }: { size?: number }) {
   return (
     <span className="inline-flex items-center gap-2 font-semibold">
-      <svg width={size} height={size} viewBox="0 0 32 32">
-        <rect width="32" height="32" rx="7" fill="#4f8cff" />
-        <rect x="7" y="17" width="4" height="8" rx="1" fill="#0b0f19" />
-        <rect x="14" y="12" width="4" height="13" rx="1" fill="#0b0f19" />
-        <rect x="21" y="7" width="4" height="18" rx="1" fill="#0b0f19" />
-      </svg>
+      <img src={logoUrl} width={size} height={size} alt="" />
       RoStats
     </span>
   )
