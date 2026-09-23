@@ -2,7 +2,8 @@
 
 Endpoints:
   GET  /api/health              service status, which keys are configured
-  POST /api/chat                chatbot backed by Claude (cheapest model, short answers)
+  POST /api/chat                chatbot backed by Gemini (cheapest text model, short answers)
+  GET  /api/chat/ping           tiny live check of the chat model (a few tokens)
   POST /api/art                 image generation backed by Gemini, reference images + change notes
   GET  /api/roblox/games        public Roblox game stats (CCU, visits, favorites) by universe id
   GET  /api/roblox/universe     resolve a place id to its universe id
@@ -22,7 +23,10 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 # Cheapest options while we test. Bump later.
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 CLAUDE_MAX_TOKENS = int(os.environ.get("CLAUDE_MAX_TOKENS", "300"))
-GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-lite-image")
+GEMINI_CHAT_MODEL = os.environ.get("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
+# "gemini" (default) or "claude"
+CHAT_PROVIDER = os.environ.get("CHAT_PROVIDER", "gemini")
 
 app = FastAPI(title="RoStats API", docs_url=None, redoc_url=None)
 
@@ -58,6 +62,8 @@ async def health():
         "google_key_ok": google_ok,
         "claude_model": CLAUDE_MODEL,
         "image_model": GEMINI_IMAGE_MODEL,
+        "chat_provider": CHAT_PROVIDER,
+        "chat_model": GEMINI_CHAT_MODEL if CHAT_PROVIDER == "gemini" else CLAUDE_MODEL,
     }
 
 
@@ -85,6 +91,8 @@ SYSTEM_PROMPT = (
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    if CHAT_PROVIDER == "gemini":
+        return await chat_gemini(req)
     if not ANTHROPIC_API_KEY:
         raise HTTPException(503, "Claude API key is not configured")
     system = SYSTEM_PROMPT
@@ -111,6 +119,107 @@ async def chat(req: ChatRequest):
     data = r.json()
     text = "".join(p.get("text", "") for p in data.get("content", []) if p.get("type") == "text")
     return {"reply": text, "usage": data.get("usage")}
+
+
+_UNSET = object()
+_THINKING_OPTIONS = [{"thinkingLevel": "minimal"}, {"thinkingLevel": "low"}, {"thinkingBudget": 0}, None]
+_THINKING_OK = _UNSET  # remembered per warm instance once a setting works
+
+
+async def chat_gemini(req: ChatRequest, max_tokens: int = CLAUDE_MAX_TOKENS):
+    if not GOOGLE_API_KEY:
+        raise HTTPException(503, "Google API key is not configured")
+    system = SYSTEM_PROMPT
+    if req.context:
+        system += "\n\nDeveloper's data:\n" + req.context
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [
+            {"role": "user" if m.role == "user" else "model", "parts": [{"text": m.content}]}
+            for m in req.messages
+        ],
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_CHAT_MODEL}:generateContent"
+    # Keep thinking as low as the model allows: faster and cheaper. Models differ in
+    # which setting they accept, so try the cheapest first and fall back on 400.
+    global _THINKING_OK
+    options = [_THINKING_OK] if _THINKING_OK is not _UNSET else _THINKING_OPTIONS
+    async with httpx.AsyncClient(timeout=60) as c:
+        for opt in options:
+            if opt is None:
+                body["generationConfig"].pop("thinkingConfig", None)
+            else:
+                body["generationConfig"]["thinkingConfig"] = opt
+            r = await c.post(url, params={"key": GOOGLE_API_KEY}, json=body)
+            if r.status_code != 400:
+                if r.status_code == 200:
+                    _THINKING_OK = opt
+                break
+    if r.status_code != 200:
+        raise HTTPException(502, f"Gemini error {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    text = "".join(
+        p.get("text", "")
+        for cand in data.get("candidates", [])[:1]
+        for p in cand.get("content", {}).get("parts", [])
+    )
+    return {"reply": text.strip(), "usage": data.get("usageMetadata")}
+
+
+@app.get("/api/chat/ping")
+async def chat_ping():
+    """Cheap live check: a tiny reply. Returns errors as JSON instead of failing."""
+    req = ChatRequest(messages=[ChatMessage(role="user", content="Reply with the single word: ok")])
+    try:
+        return await chat_gemini(req, max_tokens=40)
+    except HTTPException as e:
+        models = []
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": GOOGLE_API_KEY, "pageSize": 200},
+            )
+            if r.status_code == 200:
+                models = [m["name"] for m in r.json().get("models", []) if "flash" in m["name"]]
+        return {"ok": False, "error": e.detail, "model": GEMINI_CHAT_MODEL, "available_flash_models": models}
+
+
+@app.get("/api/chat/diag")
+async def chat_diag(model: str | None = None, i: int | None = None, t: float = 7, mode: str = "generate"):
+    """Tries each thinking setting once with a short timeout and reports status and time."""
+    import time
+    m = model or GEMINI_CHAT_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+    out = []
+    if mode == "interactions":
+        start = time.time()
+        async with httpx.AsyncClient(timeout=t) as c:
+            try:
+                r = await c.post(
+                    "https://generativelanguage.googleapis.com/v1beta/interactions",
+                    params={"key": GOOGLE_API_KEY},
+                    json={"model": m, "input": "Say ok"},
+                )
+                return {"model": m, "mode": mode, "status": r.status_code, "secs": round(time.time() - start, 1), "body": r.text[:600]}
+            except httpx.HTTPError as e:
+                return {"model": m, "mode": mode, "error": e.__class__.__name__, "secs": round(time.time() - start, 1)}
+    opts = _THINKING_OPTIONS if i is None else [_THINKING_OPTIONS[i]]
+    async with httpx.AsyncClient(timeout=t) as c:
+        for opt in opts:
+            gc = {"maxOutputTokens": 20}
+            if opt is not None:
+                gc["thinkingConfig"] = opt
+            body = {"contents": [{"role": "user", "parts": [{"text": "Say ok"}]}], "generationConfig": gc}
+            t = time.time()
+            try:
+                r = await c.post(url, params={"key": GOOGLE_API_KEY}, json=body)
+                out.append({"thinking": opt, "status": r.status_code, "secs": round(time.time() - t, 1), "body": r.text[:160]})
+                if r.status_code == 200:
+                    break
+            except httpx.HTTPError as e:
+                out.append({"thinking": opt, "error": e.__class__.__name__, "secs": round(time.time() - t, 1)})
+    return {"model": m, "results": out}
 
 
 # ---------- Art generator ----------
