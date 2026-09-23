@@ -246,6 +246,7 @@ async def health():
 ROBLOX_AUTHORIZE = "https://apis.roblox.com/oauth/v1/authorize"
 ROBLOX_TOKEN = "https://apis.roblox.com/oauth/v1/token"
 ROBLOX_USERINFO = "https://apis.roblox.com/oauth/v1/userinfo"
+ROBLOX_SCOPES = os.environ.get("ROBLOX_SCOPES", "openid profile")
 REDIRECT_URI = f"{PUBLIC_API_URL}/api/auth/callback"
 
 
@@ -266,7 +267,7 @@ async def auth_login(return_to: str):
     query = urlencode({
         "client_id": ROBLOX_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
-        "scope": "openid profile",
+        "scope": ROBLOX_SCOPES,
         "response_type": "code",
         "state": state,
         "code_challenge": challenge,
@@ -303,8 +304,23 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
         info = await c.get(ROBLOX_USERINFO, headers={"authorization": f"Bearer {tok.json()['access_token']}"})
         if info.status_code != 200:
             return RedirectResponse(f"{back}#/auth/callback?error=profile", status_code=302)
-    u = info.json()
-    uid = int(u["sub"])
+        u = info.json()
+        uid = int(u["sub"])
+        # With only the openid scope Roblox returns just the ID, so fill the rest from public APIs.
+        if not u.get("preferred_username"):
+            try:
+                pub = (await c.get(f"https://users.roblox.com/v1/users/{uid}")).json()
+                u["preferred_username"] = pub.get("name")
+                u["nickname"] = pub.get("displayName")
+            except Exception:
+                pass
+        if not u.get("picture"):
+            try:
+                th = (await c.get("https://thumbnails.roblox.com/v1/users/avatar-headshot",
+                                  params={"userIds": uid, "size": "150x150", "format": "Png"})).json()
+                u["picture"] = (th.get("data") or [{}])[0].get("imageUrl")
+            except Exception:
+                pass
     with db() as conn:
         conn.execute(
             """insert into users (id, name, display_name, picture) values (%s, %s, %s, %s)
