@@ -10,6 +10,7 @@ Public:    GET  /api/health, GET /api/market, /api/market/rising, /api/market/ca
 Every AI endpoint needs a signed-in Pro user and is limited per user, so nobody can
 spend the Gemini key through the public URL.
 """
+import asyncio
 import base64
 import datetime as dt
 import hashlib
@@ -886,7 +887,7 @@ async def market():
 # which lets us find games whose player count is climbing fast.
 
 CATEGORIES: list[dict] = [
-    {"name": "+1", "queries": ["+1 speed", "+1 every second", "+1"], "match": r"\+\s?1\b"},
+    {"name": "+1", "queries": ["+1 speed", "+1"], "match": r"\+\s?1\b"},
     {"name": "Brainrot", "queries": ["brainrot"], "match": r"brainrot"},
     {"name": "Tsunami", "queries": ["tsunami"], "match": r"tsunami"},
     {"name": "Steal a", "queries": ["steal a"], "match": r"steal"},
@@ -929,6 +930,9 @@ async def _omni_search(c: httpx.AsyncClient, query: str, pages: int = 3) -> list
             params["pageToken"] = token
         r = await c.get("https://apis.roblox.com/search-api/omni-search", params=params)
         if r.status_code == 429:
+            await asyncio.sleep(2)
+            r = await c.get("https://apis.roblox.com/search-api/omni-search", params=params)
+        if r.status_code == 429:
             if found:
                 break
             raise HTTPException(503, "Roblox is limiting searches right now. Try again in a minute.")
@@ -970,7 +974,7 @@ async def _category(c: httpx.AsyncClient, conn, cat: dict, refresh: bool = False
     games: dict[str, dict] = {}
     try:
         for q in cat["queries"]:
-            for g in await _omni_search(c, q):
+            for g in await _omni_search(c, q, pages=3 if len(cat["queries"]) == 1 else 2):
                 games.setdefault(g["universe_id"], g)
     except HTTPException:
         stale = _kv_get(conn, key)
