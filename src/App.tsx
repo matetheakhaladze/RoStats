@@ -44,6 +44,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="*" element={<Landing />} />
           <Route path="/app" element={<Layout />}>
             <Route index element={<Overview />} />
             <Route path="players" element={<Metrics kind="players" />} />
