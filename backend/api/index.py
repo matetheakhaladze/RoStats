@@ -235,6 +235,7 @@ async def health():
         "database": db_ok,
         "roblox_login": bool(ROBLOX_CLIENT_ID and ROBLOX_CLIENT_SECRET),
         "session_secret": bool(SESSION_SECRET),
+        "owners": len(OWNER_IDS),
         "gemini": bool(GOOGLE_API_KEY),
         "chat_model": GEMINI_CHAT_MODEL,
         "image_model": GEMINI_IMAGE_MODEL,
