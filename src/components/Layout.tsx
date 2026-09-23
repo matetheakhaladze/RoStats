@@ -8,6 +8,7 @@ import logoUrl from '../assets/logo.png'
 import { useAuth } from '../lib/auth'
 import { loginUrl } from '../lib/api'
 import { Spinner } from './data'
+import { ThemeToggle } from '../lib/theme'
 
 const nav = [
   { section: 'Analytics', items: [
@@ -147,13 +148,14 @@ export default function Layout() {
           </div>
 
           <div className="ml-auto flex items-center gap-3">
+            <ThemeToggle />
             <div className="hidden sm:block text-right">
               <div className="text-sm font-medium leading-tight">{me.display_name || me.name}</div>
               <div className="text-xs text-muted leading-tight">@{me.name}</div>
             </div>
             {me.picture
               ? <img src={me.picture} alt="" className="h-8 w-8 rounded-full bg-panel-2" />
-              : <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-semibold">{me.name.slice(0, 2).toUpperCase()}</div>}
+              : <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-semibold text-white">{me.name.slice(0, 2).toUpperCase()}</div>}
             <button className="btn px-2" title="Sign out" onClick={signOut}><LogOut size={14} /></button>
           </div>
         </header>

@@ -52,9 +52,9 @@ export function Stat({ label, value, change, hint }: { label: string; value: str
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'good' | 'warn' | 'bad' | 'accent' }) {
   const tones: Record<string, string> = {
     neutral: 'bg-panel-2 text-muted',
-    good: 'bg-[#0f2a22] text-good',
-    warn: 'bg-[#2e2510] text-warn',
-    bad: 'bg-[#2e1616] text-bad',
+    good: 'bg-good-soft text-good',
+    warn: 'bg-warn-soft text-warn',
+    bad: 'bg-bad-soft text-bad',
     accent: 'bg-accent-soft text-accent',
   }
   return <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-medium ${tones[tone]}`}>{children}</span>
@@ -98,9 +98,9 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 }
 
 export const chartTooltip = {
-  contentStyle: { background: '#171e30', border: '1px solid #232b3d', borderRadius: 8, fontSize: 12 },
-  labelStyle: { color: '#8b94a8' },
-  itemStyle: { color: '#e6eaf2' },
+  contentStyle: { background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: 'var(--muted)' },
+  itemStyle: { color: 'var(--text)' },
 }
 
-export const axisStyle = { fontSize: 11, fill: '#8b94a8' }
+export const axisStyle = { fontSize: 11, fill: 'var(--muted)' }
