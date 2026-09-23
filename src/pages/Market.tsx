@@ -1,85 +1,72 @@
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowDownRight, ArrowUpRight, Bell } from 'lucide-react'
-import { PageHeader, Card, Stat, Badge, Progress, chartTooltip, axisStyle } from '../components/ui'
-import { marketTrend, trendingKeywords, upcomingGames } from '../data/mock'
+import { useEffect, useMemo, useState } from 'react'
+import { ExternalLink, RefreshCw } from 'lucide-react'
+import { PageHeader, Card, Badge, Segmented } from '../components/ui'
+import { Spinner } from '../components/data'
+import { api, fmt, type MarketSort } from '../lib/api'
 
 export default function Market() {
+  const [sorts, setSorts] = useState<MarketSort[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [active, setActive] = useState<string>('')
+  const [updated, setUpdated] = useState<number>(0)
+
+  const load = () => {
+    setError(null)
+    api.market()
+      .then((r) => { setSorts(r.sorts); setUpdated(r.updated); if (r.sorts[0] && !active) setActive(r.sorts[0].title) })
+      .catch((e) => setError(e.message))
+  }
+  useEffect(load, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sort = useMemo(() => sorts?.find((s) => s.title === active) ?? sorts?.[0], [sorts, active])
+  const total = sort?.games.reduce((s, g) => s + g.playing, 0) ?? 0
+
   return (
     <div>
-      <PageHeader title="Market Trends" subtitle="What is growing on the platform and what is about to launch" actions={<Badge tone="accent">Updated hourly</Badge>} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Platform CCU" value="6.4M" change={3.2} hint="concurrent players" />
-        <Stat label="Fastest genre" value="Horror" change={21.7} hint="CCU growth, 30d" />
-        <Stat label="Upcoming launches" value="38" hint="tracked, next 90 days" />
-        <Stat label="Your genre rank" value="#14" change={6} hint="Obby, by CCU" />
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Card title="Genre CCU over 12 weeks" subtitle="Thousands of concurrent players" className="lg:col-span-2">
-          <div className="h-72">
-            <ResponsiveContainer>
-              <LineChart data={marketTrend} margin={{ left: -20, right: 8 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="week" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} />
-                <Tooltip {...chartTooltip} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="simulator" stroke="#4f8cff" strokeWidth={2} dot={false} name="Simulator" />
-                <Line type="monotone" dataKey="horror" stroke="#f87171" strokeWidth={2} dot={false} name="Horror" />
-                <Line type="monotone" dataKey="tycoon" stroke="#34d399" strokeWidth={2} dot={false} name="Tycoon" />
-                <Line type="monotone" dataKey="racing" stroke="#fbbf24" strokeWidth={2} dot={false} name="Racing" />
-              </LineChart>
-            </ResponsiveContainer>
+      <PageHeader
+        title="Market Trends"
+        subtitle="Live from the Roblox home page, refreshed every 10 minutes"
+        actions={<button className="btn" onClick={load}><RefreshCw size={14} />Refresh</button>}
+      />
+      {error && <Card><p className="text-sm text-bad">{error}</p></Card>}
+      {!sorts && !error && <Spinner label="Loading Roblox charts" />}
+      {sorts && !sorts.length && <Card><p className="text-sm text-muted">Roblox did not return any charts right now. Try again in a few minutes.</p></Card>}
+      {sort && (
+        <>
+          <div className="mb-4 overflow-x-auto">
+            <Segmented options={sorts!.map((s) => s.title)} value={sort.title} onChange={setActive} />
           </div>
-        </Card>
-
-        <Card title="Trending searches" subtitle="Relative search volume, 7 days">
-          <div className="space-y-4">
-            {trendingKeywords.map((k) => (
-              <div key={k.keyword}>
-                <div className="flex items-center justify-between text-sm mb-1.5">
-                  <span>{k.keyword}</span>
-                  <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${k.change >= 0 ? 'text-good' : 'text-bad'}`}>
-                    {k.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{Math.abs(k.change)}%
-                  </span>
-                </div>
-                <Progress value={k.volume} tone={k.change >= 20 ? 'good' : 'accent'} />
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="mt-4">
-        <Card title="Upcoming games" subtitle="Not launched yet, ranked by hype: wishlists, Discord growth, teaser views and creator followers">
-          <table className="table w-full">
-            <thead><tr><th>Game</th><th>Genre</th><th>Launch</th><th>Hype score</th><th className="text-right">Discord</th><th className="text-right">Teaser views</th><th className="text-right">7d trend</th><th></th></tr></thead>
-            <tbody>
-              {upcomingGames.map((g) => (
-                <tr key={g.name}>
-                  <td>
-                    <div className="font-medium">{g.name}</div>
-                    <div className="text-xs text-muted">{g.studio}</div>
-                  </td>
-                  <td><Badge tone={g.genre === 'Obby' ? 'accent' : 'neutral'}>{g.genre}</Badge></td>
-                  <td className="text-muted">{g.launch}</td>
-                  <td>
-                    <div className="flex items-center gap-2 w-32">
-                      <Progress value={g.signals} tone={g.signals >= 85 ? 'good' : g.signals >= 70 ? 'accent' : 'warn'} />
-                      <span className="text-xs">{g.signals}</span>
-                    </div>
-                  </td>
-                  <td className="text-right">{g.discord}</td>
-                  <td className="text-right">{g.teaserViews}</td>
-                  <td className={`text-right ${g.trend >= 0 ? 'text-good' : 'text-bad'}`}>{g.trend > 0 ? '+' : ''}{g.trend}%</td>
-                  <td className="text-right"><button className="btn px-2 py-1 text-xs"><Bell size={12} />Watch</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      </div>
+          <Card
+            title={sort.title}
+            subtitle={`${sort.games.length} games · ${fmt(total)} playing now · updated ${new Date(updated * 1000).toLocaleTimeString()}`}
+          >
+            <table className="table w-full">
+              <thead><tr><th>#</th><th>Game</th><th className="text-right">Playing</th><th className="text-right">Share</th><th className="text-right">Rating</th><th></th></tr></thead>
+              <tbody>
+                {sort.games.map((g, i) => (
+                  <tr key={g.universe_id}>
+                    <td className="text-muted w-8">{i + 1}</td>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        {g.icon ? <img src={g.icon} alt="" className="h-9 w-9 rounded-lg bg-panel-2" /> : <div className="h-9 w-9 rounded-lg bg-panel-2" />}
+                        <span className="font-medium">{g.name}</span>
+                      </div>
+                    </td>
+                    <td className="text-right">{fmt(g.playing)}</td>
+                    <td className="text-right text-muted">{total ? `${Math.round((g.playing / total) * 100)}%` : '-'}</td>
+                    <td className="text-right">
+                      {g.rating != null ? <Badge tone={g.rating >= 85 ? 'good' : g.rating >= 70 ? 'warn' : 'bad'}>{g.rating}%</Badge> : '-'}
+                    </td>
+                    <td className="text-right">
+                      {g.place_id && <a className="btn px-2 py-1" href={`https://www.roblox.com/games/${g.place_id}`} target="_blank" rel="noreferrer"><ExternalLink size={12} /></a>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
     </div>
   )
 }

@@ -28,3 +28,6 @@ dist-ssr
 !backend/.env.example
 *.env
 backend/.env
+
+__pycache__/
+*.pyc

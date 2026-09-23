@@ -1,22 +1,27 @@
 import { Link } from 'react-router-dom'
-import { BarChart3, Coins, Image, MessageSquare, Route, Server, Check } from 'lucide-react'
-import { Logo } from '../components/Layout'
+import { BarChart3, Coins, Image, MessageSquare, TrendingUp, Upload, Check } from 'lucide-react'
+import { Logo, RobloxButton } from '../components/Layout'
+import { useAuth } from '../lib/auth'
 
 const features = [
-  { icon: BarChart3, title: 'Player analytics', text: 'Retention cohorts, session length, demographics and device split for every experience you own.' },
-  { icon: Server, title: 'Live server health', text: 'CPU, memory, ping and FPS per server with crash logs pulled straight from your scripts.' },
-  { icon: Coins, title: 'Monetization insights', text: 'Revenue by product, purchase funnels, ARPPU and LTV so you know exactly what sells.' },
-  { icon: Route, title: 'User journey maps', text: 'See where players drop off between the tutorial, the lobby and the first purchase.' },
-  { icon: Image, title: 'Art generator', text: 'Turn a Studio screenshot into cartoon or anime thumbnails, icons and vectors, then test how they stand out on the Roblox home menu.' },
-  { icon: MessageSquare, title: 'Chatbot that knows your data', text: 'Ask why revenue dropped, which server is lagging, or have it write your next Discord update.' },
+  { icon: Upload, title: 'Creator Dashboard import', text: 'Export CSVs from the Roblox Creator Dashboard and drop them in. RoStats charts them and points out what matters.' },
+  { icon: BarChart3, title: 'Players and retention', text: 'Visits, concurrents, retention and session time from your own exports, with week over week changes.' },
+  { icon: Coins, title: 'Monetization', text: 'Robux revenue, game passes and developer products side by side, with AI notes on what is selling.' },
+  { icon: TrendingUp, title: 'Market trends', text: 'Live charts from the Roblox home page: what is trending and what is up and coming right now.' },
+  { icon: Image, title: 'Art generator', text: 'Cartoon or anime thumbnails, icons and vectors from your references, then see how they look between real games on the home menu.' },
+  { icon: MessageSquare, title: 'Chatbot', text: 'Ask about your data, plan updates, or have it write your next Discord announcement.' },
 ]
 
 const plans = [
   { name: 'Free', price: '$0', desc: 'For your first experience', items: ['1 game', '7-day data history', 'Basic dashboards', 'No AI tools'] },
-  { name: 'Pro', price: '$29', desc: 'Full access to everything', items: ['Unlimited games', 'Full data history', 'Art Generator and Chatbot', '100 credits every month', 'Reports, exports, API'], featured: true },
+  { name: 'Pro', price: '$29', desc: 'Full access to everything', items: ['Unlimited games', 'Full data history', 'Art Generator and Chatbot', '100 image credits every month', '50 AI messages per day'], featured: true },
 ]
 
 export default function Landing() {
+  const { me } = useAuth()
+  const cta = me
+    ? <Link to="/app" className="btn btn-primary">Open dashboard</Link>
+    : <RobloxButton />
   return (
     <div className="min-h-full">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 h-16">
@@ -26,10 +31,7 @@ export default function Landing() {
           <a href="#pricing" className="hover:text-text">Pricing</a>
           <a href="https://github.com/matetheakhaladze/RoStats" className="hover:text-text">GitHub</a>
         </nav>
-        <div className="flex items-center gap-2">
-          <Link to="/app" className="btn">Sign in</Link>
-          <Link to="/app" className="btn btn-primary">Open dashboard</Link>
-        </div>
+        <div className="flex items-center gap-2">{cta}</div>
       </header>
 
       <section className="mx-auto max-w-6xl px-6 pt-20 pb-16 text-center">
@@ -38,10 +40,10 @@ export default function Landing() {
           Analytics built for<br />Roblox developers
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-muted">
-          RoStats turns your experience data into decisions. Player retention, server health, monetization and AI creative tools in one dashboard.
+          Upload your Creator Dashboard exports and get clear charts, plain-language insights, market trends and AI art tools in one place.
         </p>
         <div className="mt-8 flex justify-center gap-3">
-          <Link to="/app" className="btn btn-primary px-5 py-2.5 text-sm">Try the live demo</Link>
+          {cta}
           <a href="#features" className="btn px-5 py-2.5 text-sm">See features</a>
         </div>
 
@@ -76,7 +78,7 @@ export default function Landing() {
 
       <section id="features" className="mx-auto max-w-6xl px-6 py-16">
         <h2 className="text-2xl font-semibold">Everything you need to grow an experience</h2>
-        <p className="mt-2 text-muted">Replace spreadsheets and guesswork with a dashboard that understands Roblox.</p>
+        <p className="mt-2 text-muted">No plugins or scripts in your game. Sign in with Roblox and upload your exports.</p>
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (
             <div key={f.title} className="card p-6">

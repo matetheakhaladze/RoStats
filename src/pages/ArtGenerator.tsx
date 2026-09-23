@@ -1,7 +1,9 @@
-import { useRef, useState, type ReactNode } from 'react'
-import { Sparkles, Download, RefreshCw, Image as ImageIcon, Upload, X, Eye, Play, Star, ThumbsUp } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Sparkles, Download, RefreshCw, Image as ImageIcon, Upload, X, Eye, Play, ThumbsUp, Users } from 'lucide-react'
 import { PageHeader, Card, Badge, Segmented } from '../components/ui'
-import { generateArt, fileToDataUrl } from '../lib/api'
+import { ProGate, Spinner } from '../components/data'
+import { api, fileToDataUrl, fmt, type Generation, type HomeGame } from '../lib/api'
+import { useAuth } from '../lib/auth'
 
 type Format = 'Thumbnail' | 'Icon' | 'Vector'
 type Style = 'Cartoon' | 'Anime'
@@ -9,101 +11,80 @@ type Style = 'Cartoon' | 'Anime'
 const formats: Format[] = ['Thumbnail', 'Icon', 'Vector']
 const styles: Style[] = ['Cartoon', 'Anime']
 
-const previous = [
-  { prompt: 'Make the tower taller and add lava at the bottom', style: 'Cartoon', format: 'Thumbnail', bg: '#1f2d5c', date: 'Today' },
-  { prompt: 'Turn the castle into anime style, sunset sky', style: 'Anime', format: 'Thumbnail', bg: '#4a2f12', date: 'Today' },
-  { prompt: 'Simplify to a flat icon of the main character', style: 'Cartoon', format: 'Icon', bg: '#0f3b3a', date: 'Yesterday' },
-  { prompt: 'Boss silhouette as a clean vector logo', style: 'Cartoon', format: 'Vector', bg: '#3b1030', date: 'Yesterday' },
-  { prompt: 'Add neon glow trail behind the car', style: 'Anime', format: 'Thumbnail', bg: '#1b2a4a', date: '2 days ago' },
-  { prompt: 'Group shot of all pets, bright and happy', style: 'Cartoon', format: 'Thumbnail', bg: '#2a1f4d', date: '3 days ago' },
-]
-
-// Games that surround yours on the fake Roblox home page.
-const neighbors = [
-  { name: 'Grow a Garden', players: '1.2M', bg: '#2f5d3a' },
-  { name: 'Blox Fruits', players: '640K', bg: '#3a2f6e' },
-  { name: 'Adopt Me!', players: '210K', bg: '#7a3f6a' },
-  { name: 'Brookhaven RP', players: '480K', bg: '#3f6a7a' },
-  { name: 'Rivals', players: '155K', bg: '#7a4a3f' },
-  { name: 'Dress to Impress', players: '390K', bg: '#7a3f5a' },
-  { name: '99 Nights in the Forest', players: '270K', bg: '#2f4f3a' },
-  { name: 'Fisch', players: '120K', bg: '#2f4f6e' },
-  { name: 'Murder Mystery 2', players: '88K', bg: '#5a2f2f' },
-  { name: 'Pet Simulator 99', players: '140K', bg: '#6e5a2f' },
-  { name: 'Doors', players: '95K', bg: '#2a2a2a' },
-]
-
-function Art({ bg, label, ratio = 'aspect-video', children }: { bg: string; label?: string; ratio?: string; children?: ReactNode }) {
-  return (
-    <div className={`${ratio} w-full rounded-lg flex items-center justify-center relative overflow-hidden`} style={{ background: bg }}>
-      {children ?? (
-        <div className="flex flex-col items-center gap-1.5 text-white/70">
-          <ImageIcon size={20} />
-          {label && <span className="text-[11px]">{label}</span>}
-        </div>
-      )}
-    </div>
-  )
+function Tile({ ratio, children }: { ratio: string; children?: ReactNode }) {
+  return <div className={`${ratio} w-full rounded-lg bg-panel-2 flex items-center justify-center relative overflow-hidden`}>{children}</div>
 }
 
-function HomeMenuTest({ format, image, onClose }: { format: Format; image?: string; onClose: () => void }) {
-  const [revealed, setRevealed] = useState(false)
+function HomeMenuTest({ format, image, onClose }: { format: Format; image: string; onClose: () => void }) {
+  const [games, setGames] = useState<HomeGame[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [started, setStarted] = useState(false)
+  const [revealed, setRevealed] = useState(false)
   const [picked, setPicked] = useState<number | null>(null)
-  const yourIndex = 6
-
   const isIcon = format !== 'Thumbnail'
-  const tiles = neighbors.slice(0, yourIndex).map((n) => ({ ...n, yours: false }))
-    .concat([{ name: 'Tower Escape Simulator', players: '4.8K', bg: '#1f2d5c', yours: true }])
-    .concat(neighbors.slice(yourIndex).map((n) => ({ ...n, yours: false })))
+  const { me, gameId } = useAuth()
+  const myName = me?.games.find((g) => g.universe_id === gameId)?.name ?? 'Your game'
+
+  useEffect(() => {
+    api.homeSample(isIcon ? 'icon' : 'thumbnail').then((r) => setGames(r.data)).catch((e) => setError(e.message))
+  }, [isIcon])
+
+  const [yourIndex] = useState(() => 3 + Math.floor(Math.random() * 6))
+  const tiles = games
+    ? [...games.slice(0, yourIndex).map((g) => ({ ...g, yours: false })),
+       { universe_id: 'yours', place_id: '', name: myName, playing: 0, likes: 0, dislikes: 0, rating: null, image, yours: true },
+       ...games.slice(yourIndex, 11).map((g) => ({ ...g, yours: false }))]
+    : []
+  const found = picked != null && tiles[picked]?.yours
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="card w-full max-w-5xl p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-5xl max-h-full overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="font-semibold">Home menu test</h3>
-            <p className="text-xs text-muted mt-0.5">Your {format.toLowerCase()} is hidden between real games on a Roblox home page. Find it, then reveal to see how it stands out.</p>
+            <p className="text-xs text-muted mt-0.5">Your {format.toLowerCase()} is hidden between games trending on Roblox right now. Start, find it, then reveal.</p>
           </div>
           <button className="btn px-2 py-1" onClick={onClose}><X size={14} /></button>
         </div>
 
         <div className="mt-4 rounded-xl border border-line bg-[#0e0f12] p-4">
-          <div className="flex items-center gap-3 text-xs text-white/60 mb-3">
-            <span className="font-semibold text-white/90 text-sm">Recommended for you</span>
-            <span className="ml-auto">Sort by: Relevance</span>
-          </div>
-          <div className={`grid gap-3 ${isIcon ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-8' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
-            {tiles.map((t, i) => (
-              <button
-                key={i}
-                onClick={() => { if (started && picked === null) { setPicked(i); setRevealed(true) } }}
-                className={`text-left rounded-lg transition-all ${revealed && t.yours ? 'ring-2 ring-accent' : ''} ${revealed && !t.yours ? 'opacity-40' : ''} ${picked === i && !t.yours ? 'ring-2 ring-bad' : ''}`}
-              >
-                <Art bg={started ? t.bg : '#1a1c22'} ratio={isIcon ? 'aspect-square' : 'aspect-video'}>
-                  {started && t.yours && image && <img src={image} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-                  {started ? (
-                    <div className="absolute inset-0 flex items-end p-2">
-                      <span className="text-[10px] font-medium text-white/80 drop-shadow">{revealed && t.yours ? `Your ${format.toLowerCase()}` : ''}</span>
-                    </div>
-                  ) : <span className="text-white/20 text-xs">?</span>}
-                </Art>
-                <div className="mt-1.5 px-0.5">
-                  <div className="text-xs font-medium text-white/90 truncate">{started ? t.name : 'Loading...'}</div>
-                  <div className="flex items-center gap-2 text-[10px] text-white/50"><span className="inline-flex items-center gap-0.5"><ThumbsUp size={9} />{90 - (i % 7)}%</span><span>{started ? t.players : ''} playing</span></div>
-                </div>
-              </button>
-            ))}
-          </div>
+          <div className="text-sm font-semibold text-white/90 mb-3">Recommended for you</div>
+          {error && <p className="text-sm text-bad">{error}</p>}
+          {!games && !error && <Spinner label="Loading trending games" />}
+          {games && (
+            <div className={`grid gap-3 ${isIcon ? 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
+              {tiles.map((t, i) => (
+                <button
+                  key={i}
+                  onClick={() => { if (started && picked === null) { setPicked(i); setRevealed(true) } }}
+                  className={`text-left rounded-lg transition-all ${revealed && t.yours ? 'ring-2 ring-accent' : ''} ${revealed && !t.yours ? 'opacity-40' : ''} ${picked === i && !t.yours ? 'ring-2 ring-bad' : ''}`}
+                >
+                  <Tile ratio={isIcon ? 'aspect-square' : 'aspect-video'}>
+                    {started ? <img src={t.image} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <span className="text-white/20 text-xs">?</span>}
+                  </Tile>
+                  <div className="mt-1.5 px-0.5">
+                    <div className="text-xs font-medium text-white/90 truncate">{started ? t.name : ' '}</div>
+                    {!t.yours && started && (
+                      <div className="flex items-center gap-2 text-[10px] text-white/50">
+                        {t.rating != null && <span className="inline-flex items-center gap-0.5"><ThumbsUp size={9} />{t.rating}%</span>}
+                        <span className="inline-flex items-center gap-0.5"><Users size={9} />{fmt(t.playing)}</span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {!started && <button className="btn btn-primary" onClick={() => setStarted(true)}><Play size={14} />Start test</button>}
+          {!started && <button className="btn btn-primary" onClick={() => setStarted(true)} disabled={!games}><Play size={14} />Start test</button>}
           {started && !revealed && <span className="text-sm text-muted">Click the tile you think is yours.</span>}
-          {started && <button className="btn" onClick={() => setRevealed(true)}><Eye size={14} />Reveal</button>}
+          {started && !revealed && <button className="btn" onClick={() => setRevealed(true)}><Eye size={14} />Reveal</button>}
           {revealed && (
-            <span className={`ml-auto text-sm ${picked === yourIndex ? 'text-good' : picked === null ? 'text-muted' : 'text-warn'}`}>
-              {picked === yourIndex ? 'Found it on the first try. It stands out.' : picked === null ? 'Revealed without guessing.' : 'You picked another game first. Consider brighter colors or a clearer focal point.'}
+            <span className={`ml-auto text-sm ${found ? 'text-good' : picked === null ? 'text-muted' : 'text-warn'}`}>
+              {found ? 'Found it on the first try. It stands out.' : picked === null ? 'Revealed without guessing.' : 'Another game caught your eye first. Try brighter colors, a bigger subject or more contrast.'}
             </span>
           )}
         </div>
@@ -113,18 +94,25 @@ function HomeMenuTest({ format, image, onClose }: { format: Format; image?: stri
 }
 
 export default function ArtGenerator() {
+  const { me, refresh } = useAuth()
   const [format, setFormat] = useState<Format>('Thumbnail')
   const [style, setStyle] = useState<Style>('Cartoon')
-  const [changes, setChanges] = useState('Make the tower taller, add lava at the bottom and put the avatar in the center jumping')
+  const [changes, setChanges] = useState('')
   const [refs, setRefs] = useState<{ name: string; dataUrl: string }[]>([])
-  const [busy, setBusy] = useState(false)
-  const [done, setDone] = useState(false)
-  const [test, setTest] = useState(false)
   const [count, setCount] = useState(1)
+  const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [testImage, setTestImage] = useState<string | null>(null)
+  const [history, setHistory] = useState<Generation[] | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  const loadHistory = () => { api.artHistory().then((r) => setHistory(r.data)).catch(() => setHistory([])) }
+  useEffect(loadHistory, [])
+
+  if (me?.plan !== 'pro') return (<div><PageHeader title="Art Generator" /><ProGate feature="The Art Generator" /></div>)
+
+  const credits = me.credits.total
   const ratio = format === 'Thumbnail' ? 'aspect-video' : 'aspect-square'
 
   const addFiles = async (files: FileList | null) => {
@@ -132,25 +120,29 @@ export default function ArtGenerator() {
     const next = [...refs]
     for (const f of Array.from(files).slice(0, 4 - refs.length)) next.push({ name: f.name, dataUrl: await fileToDataUrl(f) })
     setRefs(next)
+    if (fileInput.current) fileInput.current.value = ''
   }
 
   const generate = async () => {
-    setBusy(true); setDone(false); setError(null)
+    setBusy(true); setError(null); setResults([])
+    const n = Math.min(count, credits)
     try {
-      const r = await generateArt({ changes, style, kind: format, images: refs.map((x) => x.dataUrl), count })
-      setResults(r.images)
-      setDone(true)
+      for (let i = 0; i < n; i++) {
+        const r = await api.art({ changes, style, kind: format, images: refs.map((x) => x.dataUrl) })
+        setResults((prev) => [...prev, r.image])
+      }
     } catch (e) {
       setError((e as Error).message)
-      setResults([])
     } finally {
       setBusy(false)
+      refresh()
+      loadHistory()
     }
   }
 
   return (
     <div>
-      <PageHeader title="Art Generator" subtitle="Thumbnails, icons and vector art from your own reference images" actions={<Badge tone="accent">62 credits left</Badge>} />
+      <PageHeader title="Art Generator" subtitle="Thumbnails, icons and vector art from your own reference images" actions={<Badge tone={credits ? 'accent' : 'warn'}>{credits} credits left</Badge>} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Reference images" subtitle="Screenshots from Studio, old thumbnails, sketches">
@@ -165,14 +157,14 @@ export default function ArtGenerator() {
             <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
             {refs.length < 4 && (
               <button className="w-full rounded-lg border border-dashed border-line p-4 text-center text-xs text-muted hover:text-text" onClick={() => fileInput.current?.click()}>
-                <Upload size={16} className="mx-auto mb-1" />Add image (up to 4)
+                <Upload size={16} className="mx-auto mb-1" />Add image (up to 4, optional)
               </button>
             )}
           </div>
 
           <div className="mt-4">
-            <div className="text-xs text-muted mb-1.5">What to change</div>
-            <textarea className="input h-24 resize-none" value={changes} onChange={(e) => setChanges(e.target.value)} placeholder="Describe what should be different from the reference" />
+            <div className="text-xs text-muted mb-1.5">{refs.length ? 'What to change' : 'Describe the image'}</div>
+            <textarea className="input h-24 resize-none" value={changes} onChange={(e) => setChanges(e.target.value)} placeholder={refs.length ? 'Example: make the tower taller, add lava at the bottom, avatar jumping in the center' : 'Example: neon obby tower over lava, excited avatar jumping, bright sky'} />
           </div>
 
           <div className="mt-4 grid gap-3">
@@ -183,66 +175,57 @@ export default function ArtGenerator() {
             <div>
               <div className="text-xs text-muted mb-1.5">Type</div>
               <Segmented options={formats} value={format} onChange={(v) => setFormat(v as Format)} />
-              <div className="text-[11px] text-muted mt-1">{format === 'Thumbnail' ? '1920 x 1080, shown on the game page and home menu' : format === 'Icon' ? '512 x 512, shown in search and the home menu' : 'SVG logo or badge for your UI and social posts'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted mb-1.5">Variants</div>
+              <Segmented options={['1', '2', '4']} value={String(count)} onChange={(v) => setCount(Number(v))} />
             </div>
           </div>
 
-          <div className="mt-4">
-            <div className="text-xs text-muted mb-1.5">Variants</div>
-            <Segmented options={['1', '2', '4']} value={String(count)} onChange={(v) => setCount(Number(v))} />
-          </div>
-          <button className="btn btn-primary mt-4 w-full justify-center" onClick={generate} disabled={busy || !changes.trim()}>
+          <button className="btn btn-primary mt-4 w-full justify-center" onClick={generate} disabled={busy || !changes.trim() || !credits}>
             {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {busy ? `Generating ${count} ${count === 1 ? 'image' : 'images'}` : `Generate ${count} ${count === 1 ? 'image' : 'images'}`}
+            {busy ? `Generating ${results.length + 1} of ${Math.min(count, credits)}` : `Generate (${Math.min(count, credits)} ${Math.min(count, credits) === 1 ? 'credit' : 'credits'})`}
           </button>
-          <p className="mt-2 text-center text-[11px] text-muted">Uses {count} {count === 1 ? 'credit' : 'credits'}</p>
-          {error && <p className="mt-2 text-center text-[11px] text-bad">{error}</p>}
+          {!credits && <p className="mt-2 text-center text-xs text-warn">No credits left this month.</p>}
+          {error && <p className="mt-2 text-center text-xs text-bad">{error}</p>}
         </Card>
 
-        <Card title="Results" subtitle={done ? 'Download one, or test how it looks on the home menu' : 'Your variants will appear here'} className="lg:col-span-2">
+        <Card title="Results" subtitle={results.length ? 'Download one, or test how it looks on the Roblox home menu' : 'Your images will appear here'} className="lg:col-span-2">
           <div className={`grid gap-3 ${format === 'Thumbnail' ? 'sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
-            {Array.from({ length: Math.max(count, results.length) }).map((_, i) => (
-              <div key={i} className={`rounded-lg border border-line p-2 ${busy ? 'animate-pulse' : ''}`}>
-                {done && results[i] ? (
-                  <img src={results[i]} alt={`Variant ${'ABCD'[i]}`} className={`${ratio} w-full rounded-lg object-cover`} />
-                ) : (
-                  <Art bg="#171e30" ratio={ratio} label={busy ? 'Rendering' : 'Empty'} />
-                )}
-                <div className="mt-2 flex items-center justify-between gap-1">
-                  <span className="text-[11px] text-muted truncate">{style} · {format}</span>
-                  <div className="flex gap-1 shrink-0">
-                    <button className="btn px-2 py-1" title="Favorite"><Star size={12} /></button>
-                    <a className="btn px-2 py-1" title="Download" href={results[i]} download={`rostats-${format.toLowerCase()}-${'ABCD'[i]}.png`} onClick={(e) => { if (!results[i]) e.preventDefault() }}><Download size={12} /></a>
+            {Array.from({ length: Math.max(results.length, busy ? Math.min(count, credits) : 1) }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-line p-2">
+                {results[i]
+                  ? <img src={results[i]} alt="" className={`${ratio} w-full rounded-lg object-cover`} />
+                  : <Tile ratio={ratio}><div className={`flex flex-col items-center gap-1.5 text-muted ${busy ? 'animate-pulse' : ''}`}><ImageIcon size={20} /><span className="text-[11px]">{busy ? 'Rendering' : 'Empty'}</span></div></Tile>}
+                {results[i] && (
+                  <div className="mt-2 flex items-center justify-end gap-1">
+                    {format !== 'Vector' && <button className="btn px-2 py-1 text-xs" onClick={() => setTestImage(results[i])}><Eye size={12} />Home menu test</button>}
+                    <a className="btn px-2 py-1" href={results[i]} download={`rostats-${format.toLowerCase()}-${i + 1}.png`}><Download size={12} /></a>
                   </div>
-                </div>
+                )}
               </div>
             ))}
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-bg p-3">
-            <div className="text-sm">
-              <div className="font-medium">Home menu test</div>
-              <div className="text-xs text-muted">Hide the {format.toLowerCase()} between other games on a Roblox home page and see if it catches your eye.</div>
-            </div>
-            <button className="btn ml-auto" onClick={() => setTest(true)} disabled={format === 'Vector'}><Eye size={14} />{format === 'Vector' ? 'Not for vectors' : 'Run test'}</button>
           </div>
         </Card>
       </div>
 
       <div className="mt-4">
-        <Card title="Previous generations">
+        <Card title="Previous generations" subtitle="Your last 12 images">
+          {!history && <Spinner />}
+          {history && !history.length && <p className="text-sm text-muted">Nothing generated yet.</p>}
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {previous.map((h, i) => (
-              <div key={i} className="rounded-lg border border-line p-2">
-                <Art bg={h.bg} ratio={h.format === 'Thumbnail' ? 'aspect-video' : 'aspect-square'} label={h.format} />
+            {history?.map((h) => (
+              <a key={h.id} href={api.artImageUrl(h.id)} target="_blank" rel="noreferrer" className="rounded-lg border border-line p-2 hover:bg-panel-2">
+                <img src={api.artImageUrl(h.id)} alt="" loading="lazy" className={`${h.kind === 'Thumbnail' ? 'aspect-video' : 'aspect-square'} w-full rounded-lg object-cover bg-panel-2`} />
                 <div className="mt-2 text-xs truncate" title={h.prompt}>{h.prompt}</div>
-                <div className="mt-1 flex items-center justify-between text-[11px] text-muted"><span>{h.style}</span><span>{h.date}</span></div>
-              </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-muted"><span>{h.style} · {h.kind}</span><span>{new Date(h.created_at).toLocaleDateString()}</span></div>
+              </a>
             ))}
           </div>
         </Card>
       </div>
 
-      {test && <HomeMenuTest format={format} image={results[0]} onClose={() => setTest(false)} />}
+      {testImage && <HomeMenuTest format={format} image={testImage} onClose={() => setTestImage(null)} />}
     </div>
   )
 }
