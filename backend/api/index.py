@@ -966,7 +966,7 @@ async def _omni_search(c: httpx.AsyncClient, query: str, pages: int = 3) -> list
 
 
 async def _category(c: httpx.AsyncClient, conn, cat: dict, refresh: bool = False) -> dict:
-    key = "cat:" + cat["name"].lower()
+    key = ("q:" if cat.get("strict") else "cat:") + cat["name"].lower()
     if not refresh:
         hit = _kv_get(conn, key, 900)
         if hit:
@@ -985,7 +985,7 @@ async def _category(c: httpx.AsyncClient, conn, cat: dict, refresh: bool = False
     if cat.get("match"):
         rx = re.compile(cat["match"], re.I)
         matched = [g for g in rows if rx.search(g["name"])]
-        rows = matched or rows
+        rows = matched if (matched or cat.get("strict")) else rows
     rows.sort(key=lambda g: g["playing"], reverse=True)
     rows = rows[:30]
     icons = await _thumbs(c, [g["universe_id"] for g in rows], "icon")
@@ -1090,7 +1090,11 @@ async def market_categories():
 @app.get("/api/market/category")
 async def market_category(name: str = "", q: str = ""):
     if q.strip():
-        cat = {"name": q.strip()[:40], "queries": [q.strip()[:40]], "match": None}
+        words = re.findall(r"[a-z0-9+]+", q.lower())[:5]
+        # match every word by its stem, so "evolve" also finds "Evolution"
+        stems = [re.escape(w if len(w) <= 4 else w[: max(4, len(w) - 2)]) for w in words]
+        match = "".join(f"(?=.*{st})" for st in stems) if stems else None
+        cat = {"name": q.strip()[:40], "queries": [q.strip()[:40]], "match": match, "strict": True}
     else:
         cat = next((c for c in CATEGORIES if c["name"].lower() == name.lower()), None)
         if not cat:
