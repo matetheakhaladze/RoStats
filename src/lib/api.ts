@@ -79,6 +79,15 @@ export type Dataset = {
 export type MarketGame = { universe_id: string; place_id: string; name: string; playing: number; likes: number; dislikes: number; rating: number | null; icon?: string }
 export type MarketSort = { id: string; title: string; games: MarketGame[] }
 export type HomeGame = MarketGame & { image: string }
+export type Growth = { playing: number; before: number | null; hours: number | null; change: number | null; change_pct: number | null }
+export type RisingGame = {
+  universe_id: string; place_id: string; name: string; playing: number; visits?: number; rating?: number | null
+  icon?: string; genre?: string; created?: string; updated?: string; age_days: number | null; creator?: string; growth?: Growth | null
+}
+export type Rising = { mode: 'growth' | 'new'; history_hours: number; games: RisingGame[]; updated: number }
+export type MarketAnalysis = { summary: string; games: { universe_id: string; why: string; copy: string[] }[]; updated: number }
+export type BoardGame = { universe_id: string; place_id: string; name: string; playing: number; rating: number | null; icon?: string; growth?: Growth | null }
+export type Board = { name: string; games: BoardGame[]; updated: number }
 export type Generation = { id: number; prompt: string; style: string; kind: string; created_at: string }
 
 // ---------- auth
@@ -113,6 +122,11 @@ export const api = {
   artImageUrl: (id: number) => `${API_URL}/api/art/image/${id}?t=${encodeURIComponent(getToken() ?? '')}`,
 
   market: () => request<{ sorts: MarketSort[]; updated: number }>('/api/market'),
+  rising: () => request<Rising>('/api/market/rising'),
+  marketAnalysis: () => request<MarketAnalysis>('/api/market/analysis'),
+  categories: () => request<{ categories: string[] }>('/api/market/categories'),
+  board: (p: { name?: string; q?: string }) =>
+    request<Board>(`/api/market/category?${new URLSearchParams(p.q ? { q: p.q } : { name: p.name || '' })}`),
   homeSample: (kind: 'thumbnail' | 'icon') => request<{ data: HomeGame[] }>(`/api/roblox/home-sample?kind=${kind}`),
 }
 

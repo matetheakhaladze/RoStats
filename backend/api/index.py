@@ -5,7 +5,7 @@ Account:   GET  /api/me, DELETE /api/me
 Games:     POST /api/games, DELETE /api/games/{universe_id}, GET /api/games/stats
 Data:      GET/POST /api/datasets, DELETE /api/datasets/{id}
 AI:        POST /api/chat, POST /api/insights, POST /api/art, GET /api/art/history, GET /api/art/image/{id}
-Public:    GET  /api/health, GET /api/market, GET /api/roblox/home-sample, GET /api/roblox/games
+Public:    GET  /api/health, GET /api/market, /api/market/rising, /api/market/category, /api/market/snapshot, GET /api/roblox/home-sample, GET /api/roblox/games
 
 Every AI endpoint needs a signed-in Pro user and is limited per user, so nobody can
 spend the Gemini key through the public URL.
@@ -131,6 +131,18 @@ create table if not exists generations (
   created_at timestamptz not null default now()
 );
 create index if not exists generations_user on generations(user_id, created_at desc);
+create table if not exists ccu_snapshots (
+  universe_id bigint not null,
+  ts timestamptz not null default now(),
+  playing int not null,
+  primary key (universe_id, ts)
+);
+create index if not exists ccu_snapshots_ts on ccu_snapshots(ts);
+create table if not exists market_cache (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
 """
 
 _schema_ready = False
@@ -412,6 +424,8 @@ async def _game_details(c: httpx.AsyncClient, ids: list[int]) -> dict[int, dict]
             "updated": g.get("updated"),
             "created": g.get("created"),
             "max_players": g.get("maxPlayers"),
+            "description": (g.get("description") or "")[:600],
+            "creator": (g.get("creator") or {}).get("name"),
         }
     for v in votes.json().get("data", []) if votes.status_code == 200 else []:
         if v["id"] in out:
@@ -528,7 +542,7 @@ SYSTEM_PROMPT = (
 )
 
 
-async def gemini_text(contents: list[dict], system: str, max_tokens: int = CHAT_MAX_TOKENS) -> str:
+async def gemini_text(contents: list[dict], system: str, max_tokens: int = CHAT_MAX_TOKENS, json_mode: bool = False) -> str:
     global _THINKING_OK
     if not GOOGLE_API_KEY:
         raise HTTPException(503, "Gemini key is not configured")
@@ -537,6 +551,8 @@ async def gemini_text(contents: list[dict], system: str, max_tokens: int = CHAT_
         "contents": contents,
         "generationConfig": {"maxOutputTokens": max_tokens},
     }
+    if json_mode:
+        body["generationConfig"]["responseMimeType"] = "application/json"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_CHAT_MODEL}:generateContent"
     options = [_THINKING_OK] if _THINKING_OK is not _UNSET else _THINKING_OPTIONS
     async with httpx.AsyncClient(timeout=55) as c:
@@ -863,6 +879,359 @@ async def market():
             games.append({**g, "icon": icons.get(g["universe_id"]), "rating": round(100 * g["likes"] / total) if total else None})
         out.append({**s, "games": games})
     return {"sorts": out, "updated": int(time.time())}
+
+
+# ---------------------------------------------------------------- market intelligence
+# CCU snapshots are stored every ~15 min (a GitHub Actions cron pings /api/market/snapshot),
+# which lets us find games whose player count is climbing fast.
+
+CATEGORIES: list[dict] = [
+    {"name": "+1", "queries": ["+1 speed", "+1 every second", "+1"], "match": r"\+\s?1\b"},
+    {"name": "Brainrot", "queries": ["brainrot"], "match": r"brainrot"},
+    {"name": "Tsunami", "queries": ["tsunami"], "match": r"tsunami"},
+    {"name": "Steal a", "queries": ["steal a"], "match": r"steal"},
+    {"name": "Obby", "queries": ["obby"], "match": r"obby|parkour"},
+    {"name": "Tycoon", "queries": ["tycoon"], "match": r"tycoon"},
+    {"name": "Simulator", "queries": ["simulator"], "match": r"simulator"},
+    {"name": "Tower Defense", "queries": ["tower defense"], "match": r"tower defen[cs]e|\btd\b"},
+    {"name": "RNG", "queries": ["rng"], "match": r"\brng\b|luck|aura"},
+    {"name": "Horror", "queries": ["horror"], "match": None},
+    {"name": "Anime", "queries": ["anime"], "match": None},
+    {"name": "Grow a", "queries": ["grow a garden", "grow a"], "match": r"grow"},
+]
+MIN_TRACK = 50  # only snapshot games with at least this many players
+
+
+def _kv_get(conn, key: str, max_age: int | None = None):
+    row = conn.execute("select value, updated_at from market_cache where key = %s", (key,)).fetchone()
+    if not row:
+        return None
+    if max_age is not None and (dt.datetime.now(dt.timezone.utc) - row["updated_at"]).total_seconds() > max_age:
+        return None
+    return row["value"]
+
+
+def _kv_set(conn, key: str, value) -> None:
+    conn.execute(
+        """insert into market_cache (key, value, updated_at) values (%s, %s, now())
+           on conflict (key) do update set value = excluded.value, updated_at = now()""",
+        (key, Jsonb(value)),
+    )
+
+
+async def _omni_search(c: httpx.AsyncClient, query: str, pages: int = 3) -> list[dict]:
+    found: dict[str, dict] = {}
+    token = ""
+    session = str(uuid.uuid4())
+    for _ in range(pages):
+        params = {"searchQuery": query, "sessionId": session, "pageType": "all"}
+        if token:
+            params["pageToken"] = token
+        r = await c.get("https://apis.roblox.com/search-api/omni-search", params=params)
+        if r.status_code == 429:
+            if found:
+                break
+            raise HTTPException(503, "Roblox is limiting searches right now. Try again in a minute.")
+        if r.status_code != 200:
+            break
+        data = r.json()
+        items: list[dict] = []
+        for res in data.get("searchResults") or []:
+            if isinstance(res.get("contents"), list):
+                items.extend(res["contents"])
+            else:
+                items.append(res)
+        for g in items:
+            uid = g.get("universeId")
+            if not uid or (g.get("contentType") not in (None, "Game")):
+                continue
+            if g.get("isSponsored"):
+                continue
+            up, down = g.get("totalUpVotes", 0) or 0, g.get("totalDownVotes", 0) or 0
+            found[str(uid)] = {
+                "universe_id": str(uid),
+                "place_id": str(g.get("rootPlaceId") or ""),
+                "name": g.get("name") or "",
+                "playing": g.get("playerCount", 0) or 0,
+                "rating": round(100 * up / (up + down)) if up + down else None,
+            }
+        token = data.get("nextPageToken") or ""
+        if not token:
+            break
+    return list(found.values())
+
+
+async def _category(c: httpx.AsyncClient, conn, cat: dict, refresh: bool = False) -> dict:
+    key = "cat:" + cat["name"].lower()
+    if not refresh:
+        hit = _kv_get(conn, key, 900)
+        if hit:
+            return hit
+    games: dict[str, dict] = {}
+    try:
+        for q in cat["queries"]:
+            for g in await _omni_search(c, q):
+                games.setdefault(g["universe_id"], g)
+    except HTTPException:
+        stale = _kv_get(conn, key)
+        if stale:
+            return stale
+        raise
+    rows = list(games.values())
+    if cat.get("match"):
+        rx = re.compile(cat["match"], re.I)
+        matched = [g for g in rows if rx.search(g["name"])]
+        rows = matched or rows
+    rows.sort(key=lambda g: g["playing"], reverse=True)
+    rows = rows[:30]
+    icons = await _thumbs(c, [g["universe_id"] for g in rows], "icon")
+    for g in rows:
+        g["icon"] = icons.get(g["universe_id"])
+    value = {"name": cat["name"], "games": rows, "updated": int(time.time())}
+    if rows:
+        _kv_set(conn, key, value)
+    return value
+
+
+def _store_snapshot(conn, games: list[dict]) -> int:
+    seen: dict[int, int] = {}
+    for g in games:
+        try:
+            uid = int(g["universe_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (g.get("playing") or 0) >= MIN_TRACK:
+            seen[uid] = max(seen.get(uid, 0), int(g["playing"]))
+    if not seen:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            "insert into ccu_snapshots (universe_id, playing) values (%s, %s) on conflict do nothing",
+            list(seen.items()),
+        )
+    conn.execute("delete from ccu_snapshots where ts < now() - interval '4 days'")
+    return len(seen)
+
+
+async def _take_snapshot(force: bool = False) -> dict:
+    with db() as conn:
+        last = conn.execute("select max(ts) as t from ccu_snapshots").fetchone()["t"]
+        if not force and last and (dt.datetime.now(dt.timezone.utc) - last).total_seconds() < 600:
+            return {"skipped": True, "last": last.isoformat()}
+        async with httpx.AsyncClient(timeout=25) as c:
+            sorts = await _explore_sorts(c)
+            games = [g for s in sorts for g in s["games"]]
+            # refresh two categories per run, round robin, so every list stays fresh
+            slot = int(time.time() // 900)
+            for i in range(2):
+                cat = CATEGORIES[(slot * 2 + i) % len(CATEGORIES)]
+                try:
+                    games += (await _category(c, conn, cat, refresh=True))["games"]
+                except HTTPException:
+                    pass
+            for cat in CATEGORIES:
+                hit = _kv_get(conn, "cat:" + cat["name"].lower(), 3600)
+                if hit:
+                    games += hit["games"]
+        n = _store_snapshot(conn, games)
+    return {"stored": n}
+
+
+def _growth(conn, ids: list[int] | None = None) -> dict[int, dict]:
+    """Current CCU vs about 24h ago (or the oldest snapshot at least 2h old)."""
+    rows = conn.execute(
+        """
+        with latest as (
+          select distinct on (universe_id) universe_id, playing, ts from ccu_snapshots
+          where ts > now() - interval '90 minutes' order by universe_id, ts desc
+        ), past as (
+          select distinct on (universe_id) universe_id, playing, ts from ccu_snapshots
+          where ts < now() - interval '2 hours' and ts > now() - interval '30 hours'
+          order by universe_id, abs(extract(epoch from ts - (now() - interval '24 hours')))
+        ), first_seen as (
+          select universe_id, min(ts) as first_ts from ccu_snapshots group by universe_id
+        )
+        select l.universe_id, l.playing as now_playing, p.playing as then_playing, p.ts as then_ts, f.first_ts
+        from latest l left join past p using (universe_id) left join first_seen f using (universe_id)
+        where (%s::bigint[] is null or l.universe_id = any(%s::bigint[]))
+        """,
+        (ids, ids),
+    ).fetchall()
+    out = {}
+    now = dt.datetime.now(dt.timezone.utc)
+    for r in rows:
+        then = r["then_playing"]
+        hours = round((now - r["then_ts"]).total_seconds() / 3600) if r["then_ts"] else None
+        out[r["universe_id"]] = {
+            "playing": r["now_playing"],
+            "before": then,
+            "hours": hours,
+            "change": (r["now_playing"] - then) if then is not None else None,
+            "change_pct": round(100 * (r["now_playing"] - then) / max(then, 1)) if then is not None else None,
+        }
+    return out
+
+
+@app.post("/api/market/snapshot")
+@app.get("/api/market/snapshot")
+async def market_snapshot():
+    return await _take_snapshot()
+
+
+@app.get("/api/market/categories")
+async def market_categories():
+    return {"categories": [c["name"] for c in CATEGORIES]}
+
+
+@app.get("/api/market/category")
+async def market_category(name: str = "", q: str = ""):
+    if q.strip():
+        cat = {"name": q.strip()[:40], "queries": [q.strip()[:40]], "match": None}
+    else:
+        cat = next((c for c in CATEGORIES if c["name"].lower() == name.lower()), None)
+        if not cat:
+            raise HTTPException(404, "Unknown category")
+    with db() as conn:
+        async with httpx.AsyncClient(timeout=25) as c:
+            data = await _category(c, conn, cat)
+        growth = _growth(conn, [int(g["universe_id"]) for g in data["games"]])
+    games = [{**g, "growth": growth.get(int(g["universe_id"]))} for g in data["games"]]
+    return {**data, "games": games}
+
+
+async def _rising_list(conn) -> dict:
+    hit = _kv_get(conn, "rising", 600)
+    if hit:
+        return hit
+    growth = _growth(conn)
+    history = conn.execute(
+        "select extract(epoch from now() - min(ts)) / 3600 as h from ccu_snapshots"
+    ).fetchone()["h"] or 0
+    history = float(history)
+    scored = []
+    for uid, g in growth.items():
+        if g["before"] is None or g["playing"] < 300:
+            continue
+        gain = g["change"]
+        if gain <= 0:
+            continue
+        # reward big relative jumps but keep tiny games from dominating
+        score = gain / (g["before"] + 300)
+        if g["change_pct"] >= 15 or gain >= 3000:
+            scored.append((score, uid))
+    scored.sort(reverse=True)
+    ids = [uid for _, uid in scored[:24]]
+    mode = "growth"
+    async with httpx.AsyncClient(timeout=25) as c:
+        if len(ids) < 6:
+            # not enough history yet: use Roblox's own Up-and-Coming and young games from the charts
+            mode = "new"
+            sorts = await _explore_sorts(c)
+            pool: dict[str, dict] = {}
+            for s in sorts:
+                for g in s["games"]:
+                    pool.setdefault(g["universe_id"], g)
+            up = [g for s in sorts if "up" in (s["title"] or "").lower() and "coming" in (s["title"] or "").lower() for g in s["games"]]
+            ids = [int(g["universe_id"]) for g in up[:24]] or [int(u) for u in list(pool)[:40]]
+        details = await _game_details(c, ids)
+    now = dt.datetime.now(dt.timezone.utc)
+    games = []
+    for uid in ids:
+        d = details.get(uid)
+        if not d:
+            continue
+        created = d.get("created")
+        age_days = None
+        if created:
+            try:
+                age_days = (now - dt.datetime.fromisoformat(created.replace("Z", "+00:00"))).days
+            except ValueError:
+                pass
+        games.append({**d, "age_days": age_days, "growth": growth.get(uid)})
+    if mode == "new":
+        young = [g for g in games if g["age_days"] is not None and g["age_days"] <= 120]
+        games = sorted(young or games, key=lambda g: g["playing"], reverse=True)
+    games = games[:15]
+    value = {"mode": mode, "history_hours": round(history, 1), "games": games, "updated": int(time.time())}
+    _kv_set(conn, "rising", value)
+    return value
+
+
+@app.get("/api/market/rising")
+async def market_rising():
+    try:
+        await _take_snapshot()
+    except Exception:
+        pass
+    with db() as conn:
+        return await _rising_list(conn)
+
+
+MARKET_SYSTEM = (
+    "You are a Roblox market analyst helping game developers decide what to build. You get games whose "
+    "player count is rising fast, with their name, description, age, player numbers and icon. For each game "
+    "explain in plain words why it is likely growing (core hook and loop, theme or meme trend it rides, how it "
+    "combines popular formats like +1, brainrot, tsunami, steal a, obby, simulator, how the icon and title "
+    "grab clicks, how new or recently updated it is) and give 2 or 3 concrete things a developer could copy. "
+    "Be specific to the game, not generic. Short sentences, no hype, no em dashes. Also write a 2 to 3 sentence "
+    "summary of the overall trend across all games. Reply only with JSON: "
+    '{"summary": str, "games": [{"universe_id": str, "why": str, "copy": [str]}]}'
+)
+
+
+@app.get("/api/market/analysis")
+async def market_analysis(user: dict = Depends(current_user)):
+    with db() as conn:
+        cached = _kv_get(conn, "analysis", 6 * 3600)
+        if cached:
+            return cached
+        rising = await _rising_list(conn)
+    top = rising["games"][:6]
+    if not top:
+        return {"summary": "", "games": [], "updated": int(time.time())}
+    parts: list[dict] = []
+    async with httpx.AsyncClient(timeout=20) as c:
+        for g in top:
+            gr = g.get("growth") or {}
+            info = {
+                "universe_id": g["universe_id"],
+                "name": g["name"],
+                "creator": g.get("creator"),
+                "genre": g.get("genre"),
+                "age_days": g.get("age_days"),
+                "last_updated": g.get("updated"),
+                "playing_now": g["playing"],
+                "playing_before": gr.get("before"),
+                "hours_between": gr.get("hours"),
+                "visits": g.get("visits"),
+                "rating_pct": g.get("rating"),
+                "description": g.get("description"),
+            }
+            parts.append({"text": json.dumps(info, ensure_ascii=False)})
+            if g.get("icon"):
+                try:
+                    img = await c.get(g["icon"])
+                    if img.status_code == 200 and len(img.content) < 400_000:
+                        parts.append({"inline_data": {"mime_type": img.headers.get("content-type", "image/png").split(";")[0],
+                                                       "data": base64.b64encode(img.content).decode()}})
+                except httpx.HTTPError:
+                    pass
+    raw = await gemini_text([{"role": "user", "parts": parts}], MARKET_SYSTEM, max_tokens=1500, json_mode=True)
+    try:
+        data = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+    except ValueError:
+        raise HTTPException(502, "The AI answer could not be read. Try again.")
+    value = {
+        "summary": str(data.get("summary", "")),
+        "games": [
+            {"universe_id": str(x.get("universe_id")), "why": str(x.get("why", "")), "copy": [str(i) for i in x.get("copy", [])][:3]}
+            for x in data.get("games", []) if isinstance(x, dict)
+        ],
+        "updated": int(time.time()),
+    }
+    with db() as conn:
+        _kv_set(conn, "analysis", value)
+    return value
 
 
 @app.get("/api/roblox/home-sample")

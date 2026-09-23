@@ -1,0 +1,10 @@
+name: Market snapshot
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS -m 60 -X POST https://rostats-api.vercel.app/api/market/snapshot
