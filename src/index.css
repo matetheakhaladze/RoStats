@@ -82,6 +82,7 @@ body {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+@layer components {
 .card {
   background: var(--color-panel);
   border: 1px solid var(--color-line);
@@ -135,6 +136,8 @@ body {
 }
 .table tr:last-child td { border-bottom: none; }
 
+}
+
 .recharts-cartesian-grid line { stroke: var(--grid); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .dot-bg {
@@ -142,3 +145,18 @@ body {
   background-size: 22px 22px;
 }
 .recharts-tooltip-wrapper { outline: none; }
+
+@media print {
+  :root, :root[data-theme="light"], :root[data-theme="dark"] {
+    color-scheme: light;
+    --bg: #ffffff; --panel: #ffffff; --panel-2: #f1f3f7; --line: #dfe4ec; --text: #111827; --muted: #5b6475;
+    --accent: #2f6fec; --accent-soft: #e4ecfd; --good: #059669; --good-soft: #dcf5ec; --bad: #dc2626; --bad-soft: #fde6e6;
+    --warn: #b45309; --warn-soft: #fcf0dc; --grid: #e6eaf1;
+  }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #fff; }
+  .no-print { display: none !important; }
+  .print-root { display: block !important; height: auto !important; }
+  .print-main { overflow: visible !important; padding: 0 !important; }
+  .print-avoid { break-inside: avoid; }
+  .card { box-shadow: none !important; }
+}

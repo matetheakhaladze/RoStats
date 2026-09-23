@@ -41,14 +41,15 @@ export default function SettingsPage() {
     signOut()
   }
 
-  const limitReached = me.game_limit != null && me.games.length >= me.game_limit
+  const own = me.games.filter((g) => !g.shared_by)
+  const limitReached = me.game_limit != null && own.length >= me.game_limit
 
   return (
     <div>
       <PageHeader title="Settings" subtitle="Your account and games" />
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Games" subtitle={me.game_limit != null ? `Free plan: ${me.games.length} of ${me.game_limit} game` : 'Pro: unlimited games'} className="lg:col-span-2">
+        <Card title="Games" subtitle={me.game_limit != null ? `Free plan: ${own.length} of ${me.game_limit} game` : 'Pro: unlimited games'} className="lg:col-span-2">
           <div className="flex gap-2">
             <input
               className="input"
@@ -64,8 +65,8 @@ export default function SettingsPage() {
           {msg && <p className={`mt-2 text-sm ${msg.tone === 'good' ? 'text-good' : 'text-bad'}`}>{msg.text}</p>}
 
           <div className="mt-4 space-y-2">
-            {!me.games.length && <p className="text-sm text-muted">No games yet.</p>}
-            {me.games.map((g) => {
+            {!own.length && <p className="text-sm text-muted">No games yet.</p>}
+            {own.map((g) => {
               const s = stats.find((x) => x.universe_id === g.universe_id)
               return (
                 <div key={g.universe_id} className="flex items-center gap-3 rounded-lg border border-line bg-bg p-3">

@@ -139,6 +139,44 @@ create table if not exists ccu_snapshots (
   primary key (universe_id, ts)
 );
 create index if not exists ccu_snapshots_ts on ccu_snapshots(ts);
+create table if not exists teams (
+  id bigserial primary key,
+  name text not null,
+  owner_id bigint not null references users(id) on delete cascade,
+  invite_code text not null unique,
+  created_at timestamptz not null default now()
+);
+create table if not exists team_members (
+  team_id bigint not null references teams(id) on delete cascade,
+  user_id bigint not null references users(id) on delete cascade,
+  role text not null default 'member',
+  joined_at timestamptz not null default now(),
+  primary key (team_id, user_id)
+);
+create table if not exists team_games (
+  team_id bigint not null references teams(id) on delete cascade,
+  universe_id bigint not null,
+  added_by bigint not null references users(id) on delete cascade,
+  added_at timestamptz not null default now(),
+  primary key (team_id, universe_id)
+);
+create table if not exists tasks (
+  id bigserial primary key,
+  team_id bigint references teams(id) on delete cascade,
+  owner_id bigint not null references users(id) on delete cascade,
+  status text not null default 'todo',
+  title text not null,
+  notes text not null default '',
+  assignee_id bigint references users(id) on delete set null,
+  due date,
+  universe_id bigint,
+  position double precision not null default 0,
+  created_by bigint references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists tasks_team on tasks(team_id);
+create index if not exists tasks_owner on tasks(owner_id);
 create table if not exists market_cache (
   key text primary key,
   value jsonb not null,
@@ -356,10 +394,69 @@ def _games(conn, uid: int) -> list[dict]:
     ).fetchall()
 
 
+def _shared_games(conn, uid: int) -> list[dict]:
+    """Games other team members shared into teams this user belongs to."""
+    return conn.execute(
+        """
+        select distinct on (tg.universe_id) tg.universe_id, g.place_id, g.name, tg.added_at,
+               u.display_name as shared_by_display, u.name as shared_by
+        from team_members tm
+        join team_games tg on tg.team_id = tm.team_id
+        join games g on g.user_id = tg.added_by and g.universe_id = tg.universe_id
+        join users u on u.id = tg.added_by
+        where tm.user_id = %s and tg.added_by <> %s
+          and tg.universe_id not in (select universe_id from games where user_id = %s)
+        order by tg.universe_id, tg.added_at
+        """,
+        (uid, uid, uid),
+    ).fetchall()
+
+
+def _data_owners(conn, uid: int, universe_id: int) -> list[int]:
+    """Users whose uploaded data for this game the user may read: themself plus teammates sharing it."""
+    rows = conn.execute(
+        """
+        select distinct tm2.user_id from team_members tm
+        join team_games tg on tg.team_id = tm.team_id and tg.universe_id = %s
+        join team_members tm2 on tm2.team_id = tg.team_id
+        where tm.user_id = %s
+        """,
+        (universe_id, uid),
+    ).fetchall()
+    return sorted({uid, *[r["user_id"] for r in rows]})
+
+
+def _can_view_game(conn, uid: int, universe_id: int) -> bool:
+    if conn.execute("select 1 from games where user_id = %s and universe_id = %s", (uid, universe_id)).fetchone():
+        return True
+    return bool(conn.execute(
+        """select 1 from team_members tm join team_games tg on tg.team_id = tm.team_id
+           where tm.user_id = %s and tg.universe_id = %s""",
+        (uid, universe_id),
+    ).fetchone())
+
+
+def _datasets_for(conn, uid: int, universe_id: str | int | None, limit: int | None = None):
+    cols = "d.id, d.user_id, d.universe_id, d.name, d.columns, d.rows, d.uploaded_at, u.name as owner_name"
+    if universe_id:
+        owners = _data_owners(conn, uid, int(universe_id))
+        q = (f"select {cols} from datasets d join users u on u.id = d.user_id "
+             "where (d.universe_id = %s and d.user_id = any(%s)) or (d.universe_id is null and d.user_id = %s)")
+        args: list = [int(universe_id), owners, uid]
+    else:
+        q = f"select {cols} from datasets d join users u on u.id = d.user_id where d.user_id = %s"
+        args = [uid]
+    q += " order by d.uploaded_at desc"
+    if limit:
+        q += f" limit {int(limit)}"
+    return conn.execute(q, args).fetchall()
+
+
 @app.get("/api/me")
 async def me(user: dict = Depends(current_user)):
     with db() as conn:
         games = _games(conn, user["id"])
+        shared = _shared_games(conn, user["id"])
         used = conn.execute(
             "select chats from usage where user_id = %s and day = current_date", (user["id"],)
         ).fetchone()
@@ -373,7 +470,9 @@ async def me(user: dict = Depends(current_user)):
         "chats_today": used["chats"] if used else 0,
         "chats_per_day": PRO_DAILY_CHATS if is_pro(user) else 0,
         "game_limit": None if is_pro(user) else FREE_GAMES,
-        "games": [{**g, "universe_id": str(g["universe_id"]), "place_id": str(g["place_id"] or "")} for g in games],
+        "games": [{**g, "universe_id": str(g["universe_id"]), "place_id": str(g["place_id"] or ""), "shared_by": None} for g in games]
+        + [{"universe_id": str(g["universe_id"]), "place_id": str(g["place_id"] or ""), "name": g["name"], "added_at": g["added_at"],
+            "shared_by": g["shared_by_display"] or g["shared_by"]} for g in shared],
     }
 
 
@@ -465,13 +564,14 @@ async def remove_game(universe_id: int, user: dict = Depends(current_user)):
     with db() as conn:
         conn.execute("delete from games where user_id = %s and universe_id = %s", (user["id"], universe_id))
         conn.execute("delete from datasets where user_id = %s and universe_id = %s", (user["id"], universe_id))
+        conn.execute("delete from team_games where added_by = %s and universe_id = %s", (user["id"], universe_id))
     return {"deleted": True}
 
 
 @app.get("/api/games/stats")
 async def games_stats(user: dict = Depends(current_user)):
     with db() as conn:
-        ids = [g["universe_id"] for g in _games(conn, user["id"])]
+        ids = [g["universe_id"] for g in _games(conn, user["id"])] + [g["universe_id"] for g in _shared_games(conn, user["id"])]
     async with httpx.AsyncClient(timeout=15) as c:
         details = await _game_details(c, ids)
     return {"data": [details[i] for i in ids if i in details]}
@@ -492,6 +592,8 @@ async def add_dataset(body: DatasetIn, user: dict = Depends(current_user)):
         raise HTTPException(413, "File is too large (max about 1.5 MB)")
     rows = body.rows if is_pro(user) else body.rows[-7:]  # Free plan keeps the last 7 rows (days)
     with db() as conn:
+        if body.universe_id and not _can_view_game(conn, user["id"], int(body.universe_id)):
+            raise HTTPException(403, "You do not have access to this game")
         row = conn.execute(
             """insert into datasets (user_id, universe_id, name, columns, rows) values (%s, %s, %s, %s, %s)
                returning id, uploaded_at""",
@@ -502,14 +604,14 @@ async def add_dataset(body: DatasetIn, user: dict = Depends(current_user)):
 
 @app.get("/api/datasets")
 async def list_datasets(universe_id: str | None = None, user: dict = Depends(current_user)):
-    q = "select id, universe_id, name, columns, rows, uploaded_at from datasets where user_id = %s"
-    args: list = [user["id"]]
-    if universe_id:
-        q += " and (universe_id = %s or universe_id is null)"
-        args.append(int(universe_id))
     with db() as conn:
-        rows = conn.execute(q + " order by uploaded_at desc", args).fetchall()
-    return {"data": [{**r, "universe_id": str(r["universe_id"]) if r["universe_id"] else None} for r in rows]}
+        rows = _datasets_for(conn, user["id"], universe_id)
+    return {"data": [
+        {"id": r["id"], "universe_id": str(r["universe_id"]) if r["universe_id"] else None, "name": r["name"],
+         "columns": r["columns"], "rows": r["rows"], "uploaded_at": r["uploaded_at"],
+         "mine": r["user_id"] == user["id"], "owner": r["owner_name"]}
+        for r in rows
+    ]}
 
 
 @app.delete("/api/datasets/{dataset_id}")
@@ -606,12 +708,7 @@ async def chat(body: ChatIn, user: dict = Depends(require_pro)):
     with db() as conn:
         _use_chat(conn, user)
         if body.include_data:
-            q = "select name, columns, rows from datasets where user_id = %s"
-            args: list = [user["id"]]
-            if body.universe_id:
-                q += " and (universe_id = %s or universe_id is null)"
-                args.append(int(body.universe_id))
-            ds = conn.execute(q + " order by uploaded_at desc limit 8", args).fetchall()
+            ds = _datasets_for(conn, user["id"], body.universe_id, limit=8)
             if ds:
                 system += "\n\nThe developer's Creator Dashboard data:\n" + _dataset_summary(ds)
     if body.notes:
@@ -636,15 +733,10 @@ FOCUS = {
 @app.post("/api/insights")
 async def insights(body: InsightsIn, user: dict = Depends(require_pro)):
     with db() as conn:
-        q = "select name, columns, rows from datasets where user_id = %s"
-        args: list = [user["id"]]
+        ds = _datasets_for(conn, user["id"], body.universe_id)
         if body.dataset_ids:
-            q += " and id = any(%s)"
-            args.append(body.dataset_ids)
-        elif body.universe_id:
-            q += " and (universe_id = %s or universe_id is null)"
-            args.append(int(body.universe_id))
-        ds = conn.execute(q + " order by uploaded_at desc limit 8", args).fetchall()
+            ds = [d for d in ds if d["id"] in set(body.dataset_ids)]
+        ds = ds[:8]
         if not ds:
             raise HTTPException(400, "Upload a Creator Dashboard export first")
         _use_chat(conn, user)
@@ -880,6 +972,459 @@ async def market():
             games.append({**g, "icon": icons.get(g["universe_id"]), "rating": round(100 * g["likes"] / total) if total else None})
         out.append({**s, "games": games})
     return {"sorts": out, "updated": int(time.time())}
+
+
+# ---------------------------------------------------------------- teams
+
+MAX_TEAMS_OWNED = 5
+MAX_TEAM_MEMBERS = 20
+
+
+def _member(conn, team_id: int, uid: int) -> dict:
+    row = conn.execute(
+        """select t.id, t.name, t.owner_id, t.invite_code, m.role from teams t
+           join team_members m on m.team_id = t.id and m.user_id = %s where t.id = %s""",
+        (uid, team_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Team not found")
+    return row
+
+
+def _new_code() -> str:
+    return secrets.token_urlsafe(9)
+
+
+class TeamIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class JoinIn(BaseModel):
+    code: str = Field(min_length=4, max_length=40)
+
+
+class ShareGameIn(BaseModel):
+    universe_id: str
+
+
+@app.get("/api/teams")
+async def list_teams(user: dict = Depends(current_user)):
+    with db() as conn:
+        teams = conn.execute(
+            """select t.id, t.name, t.owner_id, t.invite_code, m.role from teams t
+               join team_members m on m.team_id = t.id where m.user_id = %s order by t.created_at""",
+            (user["id"],),
+        ).fetchall()
+        ids = [t["id"] for t in teams]
+        members = conn.execute(
+            """select m.team_id, u.id, u.name, u.display_name, u.picture, m.role from team_members m
+               join users u on u.id = m.user_id where m.team_id = any(%s) order by m.joined_at""",
+            (ids,),
+        ).fetchall() if ids else []
+        games = conn.execute(
+            """select tg.team_id, tg.universe_id, tg.added_by, g.name, g.place_id, u.name as added_by_name
+               from team_games tg join games g on g.user_id = tg.added_by and g.universe_id = tg.universe_id
+               join users u on u.id = tg.added_by where tg.team_id = any(%s) order by tg.added_at""",
+            (ids,),
+        ).fetchall() if ids else []
+    out = []
+    for t in teams:
+        out.append({
+            "id": str(t["id"]), "name": t["name"], "owner_id": str(t["owner_id"]), "role": t["role"],
+            "invite_code": t["invite_code"],
+            "members": [{"id": str(m["id"]), "name": m["name"], "display_name": m["display_name"], "picture": m["picture"], "role": m["role"]}
+                        for m in members if m["team_id"] == t["id"]],
+            "games": [{"universe_id": str(g["universe_id"]), "place_id": str(g["place_id"] or ""), "name": g["name"],
+                       "added_by": str(g["added_by"]), "added_by_name": g["added_by_name"]}
+                      for g in games if g["team_id"] == t["id"]],
+        })
+    return {"data": out}
+
+
+@app.post("/api/teams")
+async def create_team(body: TeamIn, user: dict = Depends(current_user)):
+    with db() as conn:
+        n = conn.execute("select count(*) as n from teams where owner_id = %s", (user["id"],)).fetchone()["n"]
+        if n >= MAX_TEAMS_OWNED:
+            raise HTTPException(400, f"You can own up to {MAX_TEAMS_OWNED} teams")
+        t = conn.execute(
+            "insert into teams (name, owner_id, invite_code) values (%s, %s, %s) returning id",
+            (body.name.strip(), user["id"], _new_code()),
+        ).fetchone()
+        conn.execute("insert into team_members (team_id, user_id, role) values (%s, %s, 'owner')", (t["id"], user["id"]))
+    return {"id": str(t["id"])}
+
+
+@app.post("/api/teams/join")
+async def join_team(body: JoinIn, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = conn.execute("select id, name from teams where invite_code = %s", (body.code.strip(),)).fetchone()
+        if not t:
+            raise HTTPException(404, "This invite link is not valid anymore. Ask for a new one.")
+        n = conn.execute("select count(*) as n from team_members where team_id = %s", (t["id"],)).fetchone()["n"]
+        if n >= MAX_TEAM_MEMBERS:
+            raise HTTPException(400, "This team is full")
+        conn.execute(
+            "insert into team_members (team_id, user_id) values (%s, %s) on conflict do nothing", (t["id"], user["id"])
+        )
+    return {"id": str(t["id"]), "name": t["name"]}
+
+
+@app.patch("/api/teams/{team_id}")
+async def rename_team(team_id: int, body: TeamIn, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _member(conn, team_id, user["id"])
+        if t["owner_id"] != user["id"]:
+            raise HTTPException(403, "Only the team owner can rename it")
+        conn.execute("update teams set name = %s where id = %s", (body.name.strip(), team_id))
+    return {"ok": True}
+
+
+@app.post("/api/teams/{team_id}/invite")
+async def reset_invite(team_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _member(conn, team_id, user["id"])
+        if t["owner_id"] != user["id"]:
+            raise HTTPException(403, "Only the team owner can reset the invite link")
+        code = _new_code()
+        conn.execute("update teams set invite_code = %s where id = %s", (code, team_id))
+    return {"invite_code": code}
+
+
+@app.delete("/api/teams/{team_id}")
+async def delete_team(team_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _member(conn, team_id, user["id"])
+        if t["owner_id"] != user["id"]:
+            raise HTTPException(403, "Only the team owner can delete it")
+        conn.execute("delete from teams where id = %s", (team_id,))
+    return {"deleted": True}
+
+
+@app.delete("/api/teams/{team_id}/members/{member_id}")
+async def remove_member(team_id: int, member_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _member(conn, team_id, user["id"])
+        if member_id != user["id"] and t["owner_id"] != user["id"]:
+            raise HTTPException(403, "Only the team owner can remove members")
+        if member_id == t["owner_id"]:
+            raise HTTPException(400, "The owner cannot leave. Delete the team instead.")
+        conn.execute("delete from team_members where team_id = %s and user_id = %s", (team_id, member_id))
+        conn.execute("delete from team_games where team_id = %s and added_by = %s", (team_id, member_id))
+        conn.execute("update tasks set assignee_id = null where team_id = %s and assignee_id = %s", (team_id, member_id))
+    return {"removed": True}
+
+
+@app.post("/api/teams/{team_id}/games")
+async def share_game(team_id: int, body: ShareGameIn, user: dict = Depends(current_user)):
+    uid = int(body.universe_id)
+    with db() as conn:
+        _member(conn, team_id, user["id"])
+        if not conn.execute("select 1 from games where user_id = %s and universe_id = %s", (user["id"], uid)).fetchone():
+            raise HTTPException(400, "You can only share games you added yourself")
+        conn.execute(
+            "insert into team_games (team_id, universe_id, added_by) values (%s, %s, %s) on conflict do nothing",
+            (team_id, uid, user["id"]),
+        )
+    return {"ok": True}
+
+
+@app.delete("/api/teams/{team_id}/games/{universe_id}")
+async def unshare_game(team_id: int, universe_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _member(conn, team_id, user["id"])
+        row = conn.execute(
+            "select added_by from team_games where team_id = %s and universe_id = %s", (team_id, universe_id)
+        ).fetchone()
+        if row and row["added_by"] != user["id"] and t["owner_id"] != user["id"]:
+            raise HTTPException(403, "Only the person who shared it or the owner can remove it")
+        conn.execute("delete from team_games where team_id = %s and universe_id = %s", (team_id, universe_id))
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- tasks (kanban)
+
+TASK_STATUSES = ("todo", "doing", "review", "done")
+
+
+class TaskIn(BaseModel):
+    team_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    status: Literal["todo", "doing", "review", "done"] = "todo"
+    notes: str = Field(default="", max_length=5000)
+    assignee_id: str | None = None
+    due: dt.date | None = None
+    universe_id: str | None = None
+
+
+class TaskPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["todo", "doing", "review", "done"] | None = None
+    notes: str | None = Field(default=None, max_length=5000)
+    assignee_id: str | None = None
+    due: dt.date | None = None
+    universe_id: str | None = None
+    position: float | None = None
+    clear: list[Literal["assignee_id", "due", "universe_id"]] = Field(default_factory=list)
+
+
+def _task_row(r: dict) -> dict:
+    return {
+        "id": str(r["id"]), "team_id": str(r["team_id"]) if r["team_id"] else None, "status": r["status"],
+        "title": r["title"], "notes": r["notes"], "assignee_id": str(r["assignee_id"]) if r["assignee_id"] else None,
+        "due": r["due"].isoformat() if r["due"] else None, "universe_id": str(r["universe_id"]) if r["universe_id"] else None,
+        "position": r["position"], "created_by": str(r["created_by"]) if r["created_by"] else None,
+        "updated_at": r["updated_at"],
+    }
+
+
+def _board_check(conn, user_id: int, team_id: str | None) -> int | None:
+    if team_id:
+        _member(conn, int(team_id), user_id)
+        return int(team_id)
+    return None
+
+
+def _task_access(conn, user_id: int, task_id: int) -> dict:
+    t = conn.execute("select * from tasks where id = %s", (task_id,)).fetchone()
+    if not t:
+        raise HTTPException(404, "Task not found")
+    if t["team_id"]:
+        _member(conn, t["team_id"], user_id)
+    elif t["owner_id"] != user_id:
+        raise HTTPException(404, "Task not found")
+    return t
+
+
+def _check_assignee(conn, team_id: int | None, user_id: int, assignee: str | None) -> int | None:
+    if not assignee:
+        return None
+    a = int(assignee)
+    if team_id is None:
+        if a != user_id:
+            raise HTTPException(400, "Personal tasks can only be assigned to you")
+        return a
+    if not conn.execute("select 1 from team_members where team_id = %s and user_id = %s", (team_id, a)).fetchone():
+        raise HTTPException(400, "That person is not in the team")
+    return a
+
+
+@app.get("/api/tasks")
+async def list_tasks(team_id: str | None = None, user: dict = Depends(current_user)):
+    with db() as conn:
+        tid = _board_check(conn, user["id"], team_id)
+        if tid:
+            rows = conn.execute("select * from tasks where team_id = %s order by position, id", (tid,)).fetchall()
+        else:
+            rows = conn.execute(
+                "select * from tasks where team_id is null and owner_id = %s order by position, id", (user["id"],)
+            ).fetchall()
+    return {"data": [_task_row(r) for r in rows]}
+
+
+@app.post("/api/tasks")
+async def create_task(body: TaskIn, user: dict = Depends(current_user)):
+    with db() as conn:
+        tid = _board_check(conn, user["id"], body.team_id)
+        n = conn.execute(
+            "select count(*) as n from tasks where " + ("team_id = %s" if tid else "team_id is null and owner_id = %s"),
+            (tid or user["id"],),
+        ).fetchone()["n"]
+        if n >= 500:
+            raise HTTPException(400, "This board is full (500 tasks). Delete some done tasks first.")
+        pos = conn.execute(
+            "select coalesce(max(position), 0) + 1 as p from tasks where status = %s and "
+            + ("team_id = %s" if tid else "team_id is null and owner_id = %s"),
+            (body.status, tid or user["id"]),
+        ).fetchone()["p"]
+        row = conn.execute(
+            """insert into tasks (team_id, owner_id, status, title, notes, assignee_id, due, universe_id, position, created_by)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning *""",
+            (tid, user["id"], body.status, body.title.strip(), body.notes,
+             _check_assignee(conn, tid, user["id"], body.assignee_id), body.due,
+             int(body.universe_id) if body.universe_id else None, pos, user["id"]),
+        ).fetchone()
+    return _task_row(row)
+
+
+@app.patch("/api/tasks/{task_id}")
+async def update_task(task_id: int, body: TaskPatch, user: dict = Depends(current_user)):
+    with db() as conn:
+        t = _task_access(conn, user["id"], task_id)
+        sets, args = [], []
+        for field in ("title", "status", "notes", "due", "position"):
+            v = getattr(body, field)
+            if v is not None:
+                sets.append(f"{field} = %s")
+                args.append(v.strip() if field == "title" else v)
+        if body.assignee_id is not None:
+            sets.append("assignee_id = %s")
+            args.append(_check_assignee(conn, t["team_id"], user["id"], body.assignee_id))
+        if body.universe_id is not None:
+            sets.append("universe_id = %s")
+            args.append(int(body.universe_id))
+        for field in body.clear:
+            sets.append(f"{field} = null")
+        if not sets:
+            return _task_row(t)
+        sets.append("updated_at = now()")
+        row = conn.execute(f"update tasks set {', '.join(sets)} where id = %s returning *", (*args, task_id)).fetchone()
+    return _task_row(row)
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: int, user: dict = Depends(current_user)):
+    with db() as conn:
+        _task_access(conn, user["id"], task_id)
+        conn.execute("delete from tasks where id = %s", (task_id,))
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------- reports
+
+REPORT_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%b %d, %Y", "%d %b %Y", "%Y-%m-%dT%H:%M:%S")
+
+
+def _parse_date(v) -> dt.date | None:
+    if not isinstance(v, str):
+        return None
+    v = v.strip().replace("Z", "")
+    for cand in (v, v[:10], v[:19]):
+        for f in REPORT_DATE_FORMATS:
+            try:
+                return dt.datetime.strptime(cand, f).date()
+            except ValueError:
+                continue
+    return None
+
+
+def _period_rows(rows: list, days: int) -> list:
+    if days <= 0 or not rows:
+        return rows
+    dates = [_parse_date(r[0]) if r else None for r in rows]
+    if sum(d is not None for d in dates) >= len(rows) / 2:
+        latest = max(d for d in dates if d)
+        start = latest - dt.timedelta(days=days - 1)
+        return [r for r, d in zip(rows, dates) if d and d >= start]
+    return rows[-days:]
+
+
+def _median(xs: list[float]) -> float | None:
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    m = len(xs) // 2
+    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def _percentile(xs: list[float], v: float | None) -> int | None:
+    xs = [x for x in xs if x is not None]
+    if v is None or not xs:
+        return None
+    return round(100 * sum(1 for x in xs if x <= v) / len(xs))
+
+
+async def _benchmark_pool(c: httpx.AsyncClient, conn) -> list[dict]:
+    hit = _kv_get(conn, "bench_pool", 3 * 3600)
+    if hit:
+        return hit
+    sorts = await _explore_sorts(c)
+    ids: list[int] = []
+    for s in sorts:
+        for g in s["games"]:
+            u = int(g["universe_id"])
+            if u not in ids:
+                ids.append(u)
+    details = await _game_details(c, ids[:100])
+    pool = [
+        {"playing": d.get("playing"), "rating": d.get("rating"), "visits": d.get("visits"), "favorites": d.get("favorites")}
+        for d in details.values()
+    ]
+    if pool:
+        _kv_set(conn, "bench_pool", pool)
+    return pool
+
+
+def _benchmarks(game: dict, pool: list[dict]) -> list[dict]:
+    def fav_rate(g):
+        return round(1000 * g["favorites"] / g["visits"], 2) if g.get("visits") and g.get("favorites") is not None else None
+
+    def like_rate(g):
+        return g.get("rating")
+
+    metrics = [
+        ("Players now", "playing", lambda g: g.get("playing"), "players"),
+        ("Like ratio", "rating", like_rate, "%"),
+        ("Favorites per 1K visits", "fav_rate", fav_rate, ""),
+    ]
+    out = []
+    for label, key, fn, unit in metrics:
+        values = [fn(p) for p in pool]
+        v = fn(game)
+        out.append({"key": key, "label": label, "value": v, "median": _median(values), "percentile": _percentile(values, v), "unit": unit})
+    return out
+
+
+async def _build_report(conn, owner_id: int, universe_id: int, days: int) -> dict:
+    async with httpx.AsyncClient(timeout=20) as c:
+        game = (await _game_details(c, [universe_id])).get(universe_id)
+        try:
+            pool = await _benchmark_pool(c, conn)
+        except Exception:
+            pool = []
+    if not game:
+        raise HTTPException(404, "Roblox did not return this game")
+    ds = _datasets_for(conn, owner_id, universe_id)
+    datasets = []
+    for d in ds:
+        rows = _period_rows(d["rows"], days)
+        if rows:
+            datasets.append({"id": d["id"], "name": d["name"], "columns": d["columns"], "rows": rows})
+    return {
+        "game": {k: game.get(k) for k in ("universe_id", "place_id", "name", "playing", "visits", "favorites", "rating", "genre", "created", "updated", "icon", "creator")},
+        "days": days,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "datasets": datasets,
+        "benchmarks": _benchmarks(game, pool) if pool else [],
+        "benchmark_pool": len(pool),
+    }
+
+
+@app.get("/api/report")
+async def report(universe_id: int, days: int = 30, user: dict = Depends(current_user)):
+    days = max(0, min(days, 365))
+    with db() as conn:
+        if not _can_view_game(conn, user["id"], universe_id):
+            raise HTTPException(403, "You do not have access to this game")
+        return await _build_report(conn, user["id"], universe_id, days)
+
+
+class ShareReportIn(BaseModel):
+    universe_id: str
+    days: int = Field(default=30, ge=0, le=365)
+
+
+@app.post("/api/report/share")
+async def share_report(body: ShareReportIn, user: dict = Depends(current_user)):
+    uid = int(body.universe_id)
+    with db() as conn:
+        if not _can_view_game(conn, user["id"], uid):
+            raise HTTPException(403, "You do not have access to this game")
+    exp = time.time() + 14 * 86400
+    token = sign({"typ": "report", "uid": user["id"], "g": uid, "d": body.days, "exp": exp})
+    return {"token": token, "expires": int(exp)}
+
+
+@app.get("/api/report/public")
+async def public_report(t: str):
+    data = unsign(t)
+    if not data or data.get("typ") != "report":
+        raise HTTPException(404, "This report link has expired or is not valid")
+    with db() as conn:
+        if not _can_view_game(conn, data["uid"], data["g"]):
+            raise HTTPException(404, "This report is no longer shared")
+        rep = await _build_report(conn, data["uid"], data["g"], data["d"])
+    return {**rep, "expires": int(data["exp"])}
 
 
 # ---------------------------------------------------------------- market intelligence

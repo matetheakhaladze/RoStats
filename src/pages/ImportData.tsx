@@ -112,7 +112,9 @@ export default function ImportData() {
                     <div className="text-xs text-muted">{d.rows.length} rows · {d.columns.length} columns · {new Date(d.uploaded_at).toLocaleString()}</div>
                   </button>
                   <button className="btn px-2 py-1" title="Download CSV" onClick={() => downloadCsv(d)}><Download size={12} /></button>
-                  <button className="btn px-2 py-1 text-bad" title="Delete" onClick={() => remove(d.id)}><Trash2 size={12} /></button>
+                  {d.mine !== false
+                    ? <button className="btn px-2 py-1 text-bad" title="Delete" onClick={() => remove(d.id)}><Trash2 size={12} /></button>
+                    : <span className="text-xs text-muted">from {d.owner}</span>}
                 </div>
                 {open === d.id && <div className="border-t border-line p-3"><DatasetChart d={d} height={220} /></div>}
               </div>
