@@ -887,7 +887,7 @@ async def market():
 # which lets us find games whose player count is climbing fast.
 
 CATEGORIES: list[dict] = [
-    {"name": "+1", "queries": ["+1 speed", "+1"], "match": r"\+\s?1\b"},
+    {"name": "+1", "queries": ["1 speed", "every second"], "match": r"\+\s?1\b"},
     {"name": "Brainrot", "queries": ["brainrot"], "match": r"brainrot"},
     {"name": "Tsunami", "queries": ["tsunami"], "match": r"tsunami"},
     {"name": "Steal a", "queries": ["steal a"], "match": r"steal"},
