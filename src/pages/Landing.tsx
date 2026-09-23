@@ -116,7 +116,7 @@ export default function Landing() {
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-muted">
           <Logo size={22} />
-          <span>Built for the Roblox developer community. Not affiliated with Roblox Corporation.</span>
+          <span className="flex flex-wrap gap-4"><a href="privacy.html" className="hover:text-text">Privacy</a><a href="terms.html" className="hover:text-text">Terms</a><span>Not affiliated with Roblox Corporation.</span></span>
         </div>
       </footer>
     </div>
