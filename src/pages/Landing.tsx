@@ -17,6 +17,8 @@ const plans = [
   { name: 'Pro', price: '$29', desc: 'Full access to everything', items: ['Unlimited games', 'Full data history', 'Art Generator and Chatbot', '100 image credits every month', '50 AI messages per day'], featured: true },
 ]
 
+const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+
 export default function Landing() {
   const { me } = useAuth()
   const cta = me
@@ -27,8 +29,8 @@ export default function Landing() {
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 h-16">
         <Logo />
         <nav className="hidden md:flex items-center gap-8 text-sm text-muted">
-          <a href="#features" className="hover:text-text">Features</a>
-          <a href="#pricing" className="hover:text-text">Pricing</a>
+          <button onClick={() => jump('features')} className="hover:text-text">Features</button>
+          <button onClick={() => jump('pricing')} className="hover:text-text">Pricing</button>
           <a href="https://github.com/matetheakhaladze/RoStats" className="hover:text-text">GitHub</a>
         </nav>
         <div className="flex items-center gap-2">{cta}</div>
@@ -44,7 +46,7 @@ export default function Landing() {
         </p>
         <div className="mt-8 flex justify-center gap-3">
           {cta}
-          <a href="#features" className="btn px-5 py-2.5 text-sm">See features</a>
+          <button onClick={() => jump('features')} className="btn px-5 py-2.5 text-sm">See features</button>
         </div>
 
         <div className="mt-16 card overflow-hidden text-left">
