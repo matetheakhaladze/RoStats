@@ -285,7 +285,10 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
         raise HTTPException(400, "Sign in expired, try again")
     back = data["r"]
     if error or not code or state != data["state"]:
-        return RedirectResponse(f"{back}#/auth/callback?error={error or 'cancelled'}", status_code=302)
+        why = error or ("no_code" if not code else "state_mismatch")
+        desc = request.query_params.get("error_description", "")
+        msg = f"{why}: {desc}" if desc else why
+        return RedirectResponse(f"{back}#/auth/callback?" + urlencode({"error": msg}), status_code=302)
     async with httpx.AsyncClient(timeout=20) as c:
         tok = await c.post(ROBLOX_TOKEN, data={
             "grant_type": "authorization_code",
