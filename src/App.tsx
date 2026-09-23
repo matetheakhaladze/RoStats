@@ -10,6 +10,11 @@ import ArtGenerator from './pages/ArtGenerator'
 import Chatbot from './pages/Chatbot'
 import SettingsPage from './pages/Settings'
 import Billing from './pages/Billing'
+import Reports from './pages/Reports'
+import PublicReport from './pages/PublicReport'
+import Teams from './pages/Teams'
+import Tasks from './pages/Tasks'
+import JoinTeam, { PENDING_JOIN } from './pages/JoinTeam'
 import { AuthProvider, useAuth } from './lib/auth'
 import { setToken } from './lib/api'
 
@@ -23,7 +28,9 @@ function AuthCallback() {
   useEffect(() => {
     if (!token) return
     setToken(token)
-    refresh().then(() => navigate('/app', { replace: true }))
+    let pending: string | null = null
+    try { pending = localStorage.getItem(PENDING_JOIN) } catch { /* ignore */ }
+    refresh().then(() => navigate(pending ? `/join/${pending}` : '/app', { replace: true }))
   }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -44,6 +51,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/join/:code" element={<JoinTeam />} />
+          <Route path="/r/:token" element={<PublicReport />} />
           <Route path="*" element={<Landing />} />
           <Route path="/app" element={<Layout />}>
             <Route index element={<Overview />} />
@@ -53,6 +62,9 @@ export default function App() {
             <Route path="data" element={<ImportData />} />
             <Route path="art" element={<ArtGenerator />} />
             <Route path="chatbot" element={<Chatbot />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="tasks" element={<Tasks />} />
+            <Route path="teams" element={<Teams />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

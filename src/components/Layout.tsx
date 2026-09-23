@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Coins, TrendingUp, Image, MessageSquare, Upload,
-  Settings, CreditCard, Menu, X, ChevronDown, LogOut, Plus,
+  Settings, CreditCard, Menu, X, ChevronDown, LogOut, Plus, FileText, Kanban, UsersRound,
 } from 'lucide-react'
 import logoUrl from '../assets/logo.png'
 import { useAuth } from '../lib/auth'
@@ -21,6 +21,11 @@ const nav = [
   { section: 'AI Tools', items: [
     { to: '/app/art', label: 'Art Generator', icon: Image },
     { to: '/app/chatbot', label: 'Chatbot', icon: MessageSquare },
+  ]},
+  { section: 'Workspace', items: [
+    { to: '/app/reports', label: 'Reports', icon: FileText },
+    { to: '/app/tasks', label: 'Tasks', icon: Kanban },
+    { to: '/app/teams', label: 'Teams', icon: UsersRound },
   ]},
   { section: 'Account', items: [
     { to: '/app/billing', label: 'Subscription', icon: CreditCard },
@@ -69,7 +74,7 @@ export default function Layout() {
   const credits = me.credits.total
 
   const sidebar = (
-    <aside className="flex h-full w-64 flex-col border-r border-line bg-panel">
+    <aside className="no-print flex h-full w-64 flex-col border-r border-line bg-panel">
       <div className="flex items-center justify-between px-5 h-16 border-b border-line">
         <Link to="/"><Logo /></Link>
         <button className="lg:hidden text-muted" onClick={() => setOpen(false)}><X size={18} /></button>
@@ -110,7 +115,7 @@ export default function Layout() {
   )
 
   return (
-    <div className="flex h-full">
+    <div className="print-root flex h-full">
       <div className="hidden lg:block">{sidebar}</div>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
@@ -120,7 +125,7 @@ export default function Layout() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center gap-3 border-b border-line bg-panel px-4 lg:px-6">
+        <header className="no-print flex h-16 items-center gap-3 border-b border-line bg-panel px-4 lg:px-6">
           <button className="lg:hidden text-muted" onClick={() => setOpen(true)}><Menu size={20} /></button>
 
           <div className="relative">
@@ -138,6 +143,7 @@ export default function Layout() {
                     className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm hover:bg-panel-2 ${g.universe_id === gameId ? 'text-accent' : ''}`}
                   >
                     <span className="truncate">{g.name}</span>
+                    {g.shared_by && <span className="ml-auto shrink-0 pl-2 text-[10px] text-muted">team</span>}
                   </button>
                 ))}
                 <Link to="/app/settings" onClick={() => setPick(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-panel-2 hover:text-text">
@@ -160,7 +166,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="print-main flex-1 overflow-y-auto p-4 lg:p-6">
           <Outlet />
         </main>
       </div>

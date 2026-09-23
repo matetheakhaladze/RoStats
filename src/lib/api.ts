@@ -40,7 +40,7 @@ const del = <T,>(path: string) => request<T>(path, { method: 'DELETE' })
 // ---------- types
 
 export type Credits = { monthly_left: number; monthly_total: number; bought: number; total: number; resets: string }
-export type MyGame = { universe_id: string; place_id: string; name: string; added_at: string }
+export type MyGame = { universe_id: string; place_id: string; name: string; added_at: string; shared_by: string | null }
 export type Me = {
   id: string
   name: string
@@ -75,6 +75,26 @@ export type Dataset = {
   columns: string[]
   rows: (string | number | null)[][]
   uploaded_at: string
+  mine?: boolean
+  owner?: string
+}
+export type TeamMember = { id: string; name: string; display_name: string | null; picture: string | null; role: string }
+export type TeamGame = { universe_id: string; place_id: string; name: string; added_by: string; added_by_name: string }
+export type Team = { id: string; name: string; owner_id: string; role: string; invite_code: string; members: TeamMember[]; games: TeamGame[] }
+export type TaskStatus = 'todo' | 'doing' | 'review' | 'done'
+export type Task = {
+  id: string; team_id: string | null; status: TaskStatus; title: string; notes: string
+  assignee_id: string | null; due: string | null; universe_id: string | null; position: number; created_by: string | null; updated_at: string
+}
+export type Benchmark = { key: string; label: string; value: number | null; median: number | null; percentile: number | null; unit: string }
+export type Report = {
+  game: { universe_id: string; place_id: string; name: string; playing: number; visits: number; favorites: number; rating: number | null; genre?: string; created?: string; updated?: string; icon?: string; creator?: string }
+  days: number
+  generated_at: string
+  datasets: Dataset[]
+  benchmarks: Benchmark[]
+  benchmark_pool: number
+  expires?: number
 }
 export type MarketGame = { universe_id: string; place_id: string; name: string; playing: number; likes: number; dislikes: number; rating: number | null; icon?: string }
 export type MarketSort = { id: string; title: string; games: MarketGame[] }
@@ -122,6 +142,22 @@ export const api = {
   artImageUrl: (id: number) => `${API_URL}/api/art/image/${id}?t=${encodeURIComponent(getToken() ?? '')}`,
 
   market: () => request<{ sorts: MarketSort[]; updated: number }>('/api/market'),
+  teams: () => request<{ data: Team[] }>('/api/teams'),
+  createTeam: (name: string) => post<{ id: string }>('/api/teams', { name }),
+  joinTeam: (code: string) => post<{ id: string; name: string }>('/api/teams/join', { code }),
+  renameTeam: (id: string, name: string) => request<{ ok: boolean }>(`/api/teams/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  resetInvite: (id: string) => post<{ invite_code: string }>(`/api/teams/${id}/invite`, {}),
+  deleteTeam: (id: string) => del<{ deleted: boolean }>(`/api/teams/${id}`),
+  removeMember: (id: string, uid: string) => del<{ removed: boolean }>(`/api/teams/${id}/members/${uid}`),
+  shareGame: (id: string, universe_id: string) => post<{ ok: boolean }>(`/api/teams/${id}/games`, { universe_id }),
+  unshareGame: (id: string, universe_id: string) => del<{ ok: boolean }>(`/api/teams/${id}/games/${universe_id}`),
+  tasks: (teamId: string | null) => request<{ data: Task[] }>(`/api/tasks${teamId ? `?team_id=${teamId}` : ''}`),
+  createTask: (t: Partial<Task> & { title: string }) => post<Task>('/api/tasks', t),
+  updateTask: (id: string, patch: Partial<Task> & { clear?: string[] }) => request<Task>(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteTask: (id: string) => del<{ deleted: boolean }>(`/api/tasks/${id}`),
+  report: (universeId: string, days: number) => request<Report>(`/api/report?universe_id=${universeId}&days=${days}`),
+  shareReport: (universe_id: string, days: number) => post<{ token: string; expires: number }>('/api/report/share', { universe_id, days }),
+  publicReport: (t: string) => request<Report>(`/api/report/public?t=${encodeURIComponent(t)}`),
   rising: () => request<Rising>('/api/market/rising'),
   marketAnalysis: () => request<MarketAnalysis>('/api/market/analysis'),
   categories: () => request<{ categories: string[] }>('/api/market/categories'),
