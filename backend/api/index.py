@@ -710,13 +710,24 @@ async def art(body: ArtIn, user: dict = Depends(require_pro)):
             "imageConfig": {"aspectRatio": "16:9" if body.kind == "Thumbnail" else "1:1"},
         },
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    models = [m.strip() for m in (GEMINI_IMAGE_MODEL + "," + os.environ.get("GEMINI_IMAGE_FALLBACKS", "")).split(",") if m.strip()]
+    r = None
     async with httpx.AsyncClient(timeout=55) as c:
-        r = await c.post(url, params={"key": GOOGLE_API_KEY}, json=req)
-    if r.status_code in (429, 503):
-        raise HTTPException(503, "The image model is busy right now. Try again in a minute. No credit was used.")
+        for m in dict.fromkeys(models):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            r = await c.post(url, params={"key": GOOGLE_API_KEY}, json=req)
+            if r.status_code not in (404, 429, 503):
+                break
     if r.status_code != 200:
-        raise HTTPException(502, f"Image model error {r.status_code}. No credit was used.")
+        try:
+            gmsg = r.json().get("error", {}).get("message", "")
+        except Exception:
+            gmsg = ""
+        if r.status_code == 429 and ("limit: 0" in gmsg or "quota" in gmsg.lower()):
+            raise HTTPException(503, "Image generation quota is used up or not enabled on the Google API key. No credit was used.")
+        if r.status_code in (429, 503):
+            raise HTTPException(503, "The image model is busy right now. Try again in a minute. No credit was used.")
+        raise HTTPException(502, f"Image model error {r.status_code}: {gmsg[:200]} No credit was used.")
     image = None
     for cand in r.json().get("candidates", []):
         for p in cand.get("content", {}).get("parts", []):
