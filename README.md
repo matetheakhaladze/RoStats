@@ -19,16 +19,14 @@ All data on the preview is mock data generated in `src/data/mock.ts`. Backend (D
 | --- | --- |
 | `/` | Landing page |
 | `/#/app` | Overview |
-| `/#/app/players` | Player Analytics |
-| `/#/app/performance` | Game Performance |
-| `/#/app/monetization` | Monetization |
-| `/#/app/market` | Market Trends |
-| `/#/app/journey` | User Journey |
-| `/#/app/art` | Art Generator |
+| `/#/app/players` | Players (from uploaded CSVs) |
+| `/#/app/monetization` | Monetization (from uploaded CSVs) |
+| `/#/app/market` | Market Trends (live Roblox charts) |
+| `/#/app/data` | Import Creator Dashboard CSVs |
+| `/#/app/art` | Art Generator + home menu test |
 | `/#/app/chatbot` | Chatbot |
-| `/#/app/reports` | Reports & Export |
-| `/#/app/billing` | Subscription |
-| `/#/app/settings` | Settings |
+| `/#/app/billing` | Subscription and credits |
+| `/#/app/settings` | Games and account |
 
 ## Development
 

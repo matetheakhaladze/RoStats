@@ -1,27 +1,27 @@
 import { useState } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, Activity, Coins, TrendingUp, Image, MessageSquare,
-  Settings, CreditCard, FileText, Route, Search, Bell, Menu, X, ChevronDown,
+  LayoutDashboard, Users, Coins, TrendingUp, Image, MessageSquare, Upload,
+  Settings, CreditCard, Menu, X, ChevronDown, LogOut, Plus,
 } from 'lucide-react'
-import { games } from '../data/mock'
 import logoUrl from '../assets/logo.png'
+import { useAuth } from '../lib/auth'
+import { loginUrl } from '../lib/api'
+import { Spinner } from './data'
 
 const nav = [
   { section: 'Analytics', items: [
     { to: '/app', label: 'Overview', icon: LayoutDashboard, end: true },
-    { to: '/app/players', label: 'Player Analytics', icon: Users },
-    { to: '/app/performance', label: 'Game Performance', icon: Activity },
+    { to: '/app/players', label: 'Players', icon: Users },
     { to: '/app/monetization', label: 'Monetization', icon: Coins },
     { to: '/app/market', label: 'Market Trends', icon: TrendingUp },
-    { to: '/app/journey', label: 'User Journey', icon: Route },
+    { to: '/app/data', label: 'Import data', icon: Upload },
   ]},
   { section: 'AI Tools', items: [
     { to: '/app/art', label: 'Art Generator', icon: Image },
     { to: '/app/chatbot', label: 'Chatbot', icon: MessageSquare },
   ]},
   { section: 'Account', items: [
-    { to: '/app/reports', label: 'Reports & Export', icon: FileText },
     { to: '/app/billing', label: 'Subscription', icon: CreditCard },
     { to: '/app/settings', label: 'Settings', icon: Settings },
   ]},
@@ -36,10 +36,36 @@ export function Logo({ size = 28 }: { size?: number }) {
   )
 }
 
+export function RobloxButton({ className = '' }: { className?: string }) {
+  return <a href={loginUrl()} className={`btn btn-primary justify-center ${className}`}>Sign in with Roblox</a>
+}
+
+function SignIn() {
+  const { error } = useAuth()
+  return (
+    <div className="flex min-h-full items-center justify-center p-6">
+      <div className="card w-full max-w-sm p-8 text-center">
+        <div className="flex justify-center"><Logo size={36} /></div>
+        <h1 className="mt-6 text-xl font-semibold">Sign in to RoStats</h1>
+        <p className="mt-2 text-sm text-muted">Use your Roblox account. We only read your public profile: name and avatar.</p>
+        <RobloxButton className="mt-6 w-full" />
+        {error && <p className="mt-4 text-xs text-bad">{error}</p>}
+        <Link to="/" className="mt-6 inline-block text-xs text-muted hover:text-text">Back to home</Link>
+      </div>
+    </div>
+  )
+}
+
 export default function Layout() {
+  const { me, loading, signOut, gameId, setGameId } = useAuth()
   const [open, setOpen] = useState(false)
-  const [game, setGame] = useState(games[0])
   const [pick, setPick] = useState(false)
+
+  if (loading) return <div className="flex h-full items-center justify-center"><Spinner /></div>
+  if (!me) return <SignIn />
+
+  const game = me.games.find((g) => g.universe_id === gameId)
+  const credits = me.credits.total
 
   const sidebar = (
     <aside className="flex h-full w-64 flex-col border-r border-line bg-panel">
@@ -74,9 +100,9 @@ export default function Layout() {
       </nav>
       <div className="border-t border-line p-4">
         <div className="card p-3 bg-panel-2">
-          <div className="text-xs text-muted">Pro plan</div>
-          <div className="text-sm font-medium mt-0.5">62 credits left</div>
-          <Link to="/app/billing" className="text-xs text-accent mt-1 inline-block">Manage plan</Link>
+          <div className="text-xs text-muted">{me.plan === 'pro' ? 'Pro plan' : 'Free plan'}</div>
+          <div className="text-sm font-medium mt-0.5">{me.plan === 'pro' ? `${credits} credits left` : 'AI tools locked'}</div>
+          <Link to="/app/billing" className="text-xs text-accent mt-1 inline-block">{me.plan === 'pro' ? 'Manage plan' : 'Upgrade'}</Link>
         </div>
       </div>
     </aside>
@@ -98,32 +124,38 @@ export default function Layout() {
 
           <div className="relative">
             <button className="btn" onClick={() => setPick((p) => !p)}>
-              <span className="h-2 w-2 rounded-full bg-good" />
-              <span className="max-w-[160px] truncate">{game.name}</span>
+              <span className={`h-2 w-2 rounded-full ${game ? 'bg-good' : 'bg-line'}`} />
+              <span className="max-w-[180px] truncate">{game ? game.name : 'No game added'}</span>
               <ChevronDown size={14} className="text-muted" />
             </button>
             {pick && (
               <div className="absolute left-0 mt-2 w-64 card p-1 z-30">
-                {games.map((g) => (
+                {me.games.map((g) => (
                   <button
-                    key={g.id}
-                    onClick={() => { setGame(g); setPick(false) }}
-                    className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm hover:bg-panel-2"
+                    key={g.universe_id}
+                    onClick={() => { setGameId(g.universe_id); setPick(false) }}
+                    className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm hover:bg-panel-2 ${g.universe_id === gameId ? 'text-accent' : ''}`}
                   >
-                    <span>{g.name}</span>
-                    <span className="text-xs text-muted">{g.players.toLocaleString()} CCU</span>
+                    <span className="truncate">{g.name}</span>
                   </button>
                 ))}
+                <Link to="/app/settings" onClick={() => setPick(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-panel-2 hover:text-text">
+                  <Plus size={14} />Add a game
+                </Link>
               </div>
             )}
           </div>
 
-          <div className="ml-auto hidden md:flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2 w-72">
-            <Search size={14} className="text-muted" />
-            <input className="bg-transparent text-sm outline-none flex-1 placeholder:text-muted" placeholder="Search metrics, players, servers" />
+          <div className="ml-auto flex items-center gap-3">
+            <div className="hidden sm:block text-right">
+              <div className="text-sm font-medium leading-tight">{me.display_name || me.name}</div>
+              <div className="text-xs text-muted leading-tight">@{me.name}</div>
+            </div>
+            {me.picture
+              ? <img src={me.picture} alt="" className="h-8 w-8 rounded-full bg-panel-2" />
+              : <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-semibold">{me.name.slice(0, 2).toUpperCase()}</div>}
+            <button className="btn px-2" title="Sign out" onClick={signOut}><LogOut size={14} /></button>
           </div>
-          <button className="btn relative"><Bell size={16} /><span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-bad" /></button>
-          <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-semibold">MA</div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">

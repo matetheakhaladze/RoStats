@@ -1,106 +1,112 @@
-import { useState } from 'react'
-import { PageHeader, Card, Badge, Toggle } from '../components/ui'
-import { games } from '../data/mock'
+import { useEffect, useState } from 'react'
+import { Plus, Trash2, ExternalLink } from 'lucide-react'
+import { PageHeader, Card, Badge } from '../components/ui'
+import { api, fmt, type GameStats } from '../lib/api'
+import { useAuth } from '../lib/auth'
 
 export default function SettingsPage() {
-  const [notify, setNotify] = useState({ crashes: true, revenue: true, weekly: true, market: false })
-  const [tab, setTab] = useState('General')
-  const tabs = ['General', 'Games', 'Notifications', 'API keys', 'Team']
+  const { me, refresh, signOut, setGameId } = useAuth()
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null)
+  const [stats, setStats] = useState<GameStats[]>([])
+  const [confirm, setConfirm] = useState(false)
+
+  const loadStats = () => { api.gameStats().then((r) => setStats(r.data)).catch(() => {}) }
+  useEffect(loadStats, [me?.games.length])
+
+  if (!me) return null
+
+  const add = async () => {
+    if (!input.trim()) return
+    setBusy(true); setMsg(null)
+    try {
+      const g = await api.addGame(input.trim())
+      setInput('')
+      setMsg({ tone: 'good', text: `Added ${g.name}` })
+      await refresh()
+      setGameId(g.universe_id)
+    } catch (e) {
+      setMsg({ tone: 'bad', text: (e as Error).message })
+    } finally { setBusy(false) }
+  }
+
+  const remove = async (id: string) => {
+    await api.removeGame(id).catch((e) => setMsg({ tone: 'bad', text: e.message }))
+    await refresh()
+  }
+
+  const deleteAccount = async () => {
+    await api.deleteMe().catch(() => {})
+    signOut()
+  }
+
+  const limitReached = me.game_limit != null && me.games.length >= me.game_limit
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Account, connected games, alerts and API access" />
+      <PageHeader title="Settings" subtitle="Your account and games" />
 
-      <div className="mb-4 flex gap-1 border-b border-line">
-        {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-sm border-b-2 -mb-px ${tab === t ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}`}>{t}</button>
-        ))}
-      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Games" subtitle={me.game_limit != null ? `Free plan: ${me.games.length} of ${me.game_limit} game` : 'Pro: unlimited games'} className="lg:col-span-2">
+          <div className="flex gap-2">
+            <input
+              className="input"
+              placeholder="Paste a game link, like https://www.roblox.com/games/123456/..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && add()}
+              disabled={busy || limitReached}
+            />
+            <button className="btn btn-primary shrink-0" onClick={add} disabled={busy || limitReached || !input.trim()}><Plus size={14} />Add</button>
+          </div>
+          {limitReached && <p className="mt-2 text-xs text-muted">Remove your game or upgrade to Pro to add more.</p>}
+          {msg && <p className={`mt-2 text-sm ${msg.tone === 'good' ? 'text-good' : 'text-bad'}`}>{msg.text}</p>}
 
-      {tab === 'General' && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Profile">
-            <div className="space-y-3">
-              <div><div className="text-xs text-muted mb-1.5">Display name</div><input className="input" defaultValue="Mate Akhaladze" /></div>
-              <div><div className="text-xs text-muted mb-1.5">Email</div><input className="input" defaultValue="mate@rostats.app" /></div>
-              <div><div className="text-xs text-muted mb-1.5">Studio name</div><input className="input" defaultValue="Hepaka Studios" /></div>
-              <div><div className="text-xs text-muted mb-1.5">Timezone</div><select className="input"><option>Asia/Tbilisi (GMT+4)</option><option>UTC</option><option>America/New_York</option></select></div>
-              <button className="btn btn-primary">Save changes</button>
-            </div>
-          </Card>
-          <Card title="Preferences">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between"><div><div className="text-sm">Currency display</div><div className="text-xs text-muted">Show revenue in Robux or estimated USD</div></div><select className="input w-32"><option>Robux</option><option>USD</option></select></div>
-              <div className="flex items-center justify-between"><div><div className="text-sm">Default date range</div><div className="text-xs text-muted">Applied when opening a dashboard</div></div><select className="input w-32"><option>30 days</option><option>7 days</option><option>90 days</option></select></div>
-              <div className="flex items-center justify-between"><div><div className="text-sm">Compact tables</div><div className="text-xs text-muted">Fit more rows on screen</div></div><Toggle checked={false} onChange={() => {}} /></div>
-              <div className="flex items-center justify-between"><div><div className="text-sm">Anonymize player names</div><div className="text-xs text-muted">Hide usernames in transcripts and exports</div></div><Toggle checked={true} onChange={() => {}} /></div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {tab === 'Games' && (
-        <Card title="Connected experiences" subtitle="Data is pulled through the Open Cloud API every 5 minutes" right={<button className="btn btn-primary">Connect a game</button>}>
-          <table className="table w-full">
-            <thead><tr><th>Experience</th><th>Universe ID</th><th>Genre</th><th>Last sync</th><th>Status</th></tr></thead>
-            <tbody>
-              {games.map((g, i) => (
-                <tr key={g.id}>
-                  <td className="font-medium">{g.name}</td>
-                  <td className="font-mono text-xs text-muted">{4820000000 + i * 91237}</td>
-                  <td>{g.genre}</td>
-                  <td className="text-muted">{i === 3 ? '2 hours ago' : '3 min ago'}</td>
-                  <td><Badge tone={i === 3 ? 'warn' : 'good'}>{i === 3 ? 'Sync delayed' : 'Connected'}</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      {tab === 'Notifications' && (
-        <Card title="Alerts" subtitle="Delivered by email and to your Discord webhook">
-          <div className="space-y-4">
-            {[
-              ['crashes', 'Crash spikes', 'When crash rate exceeds 1% in any 15-minute window'],
-              ['revenue', 'Revenue drops', 'When daily revenue falls 25% below the 7-day average'],
-              ['weekly', 'Weekly digest', 'Every Monday morning in your timezone'],
-              ['market', 'Market opportunities', 'When a genre you track grows more than 15% in a week'],
-            ].map(([k, t, d]) => (
-              <div key={k} className="flex items-center justify-between">
-                <div><div className="text-sm">{t}</div><div className="text-xs text-muted">{d}</div></div>
-                <Toggle checked={notify[k as keyof typeof notify]} onChange={(v) => setNotify({ ...notify, [k]: v })} />
-              </div>
-            ))}
-            <div><div className="text-xs text-muted mb-1.5">Discord webhook</div><input className="input" placeholder="https://discord.com/api/webhooks/..." /></div>
+          <div className="mt-4 space-y-2">
+            {!me.games.length && <p className="text-sm text-muted">No games yet.</p>}
+            {me.games.map((g) => {
+              const s = stats.find((x) => x.universe_id === g.universe_id)
+              return (
+                <div key={g.universe_id} className="flex items-center gap-3 rounded-lg border border-line bg-bg p-3">
+                  {s?.icon ? <img src={s.icon} alt="" className="h-10 w-10 rounded-lg" /> : <div className="h-10 w-10 rounded-lg bg-panel-2" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{g.name}</div>
+                    <div className="text-xs text-muted">{s ? `${fmt(s.playing)} playing · ${fmt(s.visits)} visits` : `Universe ${g.universe_id}`}</div>
+                  </div>
+                  {g.place_id && <a className="btn px-2 py-1" href={`https://www.roblox.com/games/${g.place_id}`} target="_blank" rel="noreferrer"><ExternalLink size={12} /></a>}
+                  <button className="btn px-2 py-1 text-bad" title="Remove game and its data" onClick={() => remove(g.universe_id)}><Trash2 size={12} /></button>
+                </div>
+              )
+            })}
           </div>
         </Card>
-      )}
 
-      {tab === 'API keys' && (
-        <Card title="API access" subtitle="Use the REST API to pull your metrics into Studio plugins or spreadsheets" right={<button className="btn">Create key</button>}>
-          <table className="table w-full">
-            <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
-            <tbody>
-              <tr><td>Studio plugin</td><td className="font-mono text-xs">rs_live_4f2a...9c1e</td><td className="text-muted">Aug 12, 2026</td><td className="text-muted">Today</td><td className="text-right"><button className="btn px-2 py-1 text-xs text-bad">Revoke</button></td></tr>
-              <tr><td>Google Sheets sync</td><td className="font-mono text-xs">rs_live_b71d...02aa</td><td className="text-muted">Jul 3, 2026</td><td className="text-muted">Yesterday</td><td className="text-right"><button className="btn px-2 py-1 text-xs text-bad">Revoke</button></td></tr>
-            </tbody>
-          </table>
+        <Card title="Account">
+          <div className="flex items-center gap-3">
+            {me.picture ? <img src={me.picture} alt="" className="h-12 w-12 rounded-full bg-panel-2" /> : <div className="h-12 w-12 rounded-full bg-panel-2" />}
+            <div>
+              <div className="font-medium">{me.display_name || me.name}</div>
+              <div className="text-xs text-muted">@{me.name} · ID {me.id}</div>
+            </div>
+          </div>
+          <div className="mt-3"><Badge tone={me.plan === 'pro' ? 'accent' : 'neutral'}>{me.plan === 'pro' ? 'Pro' : 'Free'}</Badge></div>
+          <div className="mt-5 space-y-2">
+            <button className="btn w-full justify-center" onClick={signOut}>Sign out</button>
+            {!confirm
+              ? <button className="btn w-full justify-center text-bad" onClick={() => setConfirm(true)}>Delete my data</button>
+              : (
+                <div className="rounded-lg border border-line bg-bg p-3 text-xs">
+                  <p>This deletes your account, games, uploaded files and generated images. It cannot be undone.</p>
+                  <div className="mt-2 flex gap-2">
+                    <button className="btn px-2 py-1 text-bad" onClick={deleteAccount}>Delete everything</button>
+                    <button className="btn px-2 py-1" onClick={() => setConfirm(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+          </div>
         </Card>
-      )}
-
-      {tab === 'Team' && (
-        <Card title="Team members" subtitle="Pro plan includes team seats" right={<button className="btn btn-primary">Invite</button>}>
-          <table className="table w-full">
-            <thead><tr><th>Member</th><th>Role</th><th>Games</th><th>Status</th></tr></thead>
-            <tbody>
-              <tr><td>Mate Akhaladze</td><td><Badge tone="accent">Owner</Badge></td><td>All</td><td><Badge tone="good">Active</Badge></td></tr>
-              <tr><td>scripter_luka</td><td>Editor</td><td>Tower Escape, Doom Evolution</td><td><Badge tone="good">Active</Badge></td></tr>
-              <tr><td>nino.builds</td><td>Viewer</td><td>All</td><td><Badge tone="warn">Invited</Badge></td></tr>
-            </tbody>
-          </table>
-        </Card>
-      )}
+      </div>
     </div>
   )
 }

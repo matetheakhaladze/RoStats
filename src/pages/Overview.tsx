@@ -1,110 +1,116 @@
-import { useState } from 'react'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Download } from 'lucide-react'
-import { PageHeader, Card, Stat, Badge, Segmented, chartTooltip, axisStyle } from '../components/ui'
-import { overviewSeries, weeklyActivity, games, topProducts, crashLog } from '../data/mock'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Gamepad2, ExternalLink } from 'lucide-react'
+import { PageHeader, Card, Stat } from '../components/ui'
+import { DatasetChart, EmptyState, InsightsCard, Spinner, UploadPrompt } from '../components/data'
+import { api, fmt, type Dataset, type GameStats } from '../lib/api'
+import { kpi, numericColumns } from '../lib/data'
+import { useAuth } from '../lib/auth'
+
+export function useGameData() {
+  const { gameId } = useAuth()
+  const [stats, setStats] = useState<GameStats | null>(null)
+  const [datasets, setDatasets] = useState<Dataset[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!gameId) { setDatasets([]); return }
+    let alive = true
+    setDatasets(null); setStats(null); setError(null)
+    api.datasets(gameId).then((r) => alive && setDatasets(r.data)).catch((e) => alive && setError(e.message))
+    api.gameStats().then((r) => alive && setStats(r.data.find((g) => g.universe_id === gameId) ?? null)).catch(() => {})
+    return () => { alive = false }
+  }, [gameId])
+
+  return { stats, datasets, error }
+}
+
+export function KpiRow({ datasets, limit = 8 }: { datasets: Dataset[]; limit?: number }) {
+  const tiles: { label: string; value: string; change?: number; hint: string }[] = []
+  for (const d of datasets) {
+    for (const c of numericColumns(d)) {
+      const k = kpi(d, Number(c.key))
+      if (!k) continue
+      tiles.push({
+        label: c.label,
+        value: c.isPercent && k.latest <= 100 ? `${fmt(k.latest)}%` : fmt(k.latest),
+        change: k.change,
+        hint: k.change != null ? `vs previous ${k.window} days` : d.name,
+      })
+      if (tiles.length >= limit) break
+    }
+    if (tiles.length >= limit) break
+  }
+  if (!tiles.length) return null
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {tiles.map((t, i) => <Stat key={i} label={t.label} value={t.value} change={t.change} hint={t.hint} />)}
+    </div>
+  )
+}
 
 export default function Overview() {
-  const [range, setRange] = useState('30d')
-  const data = range === '7d' ? overviewSeries.slice(-7) : range === '14d' ? overviewSeries.slice(-14) : overviewSeries
+  const { me, gameId } = useAuth()
+  const { stats, datasets, error } = useGameData()
+
+  if (!me?.games.length || !gameId) {
+    return (
+      <div>
+        <PageHeader title="Overview" />
+        <EmptyState
+          icon={<Gamepad2 size={24} />}
+          title="Add your first game"
+          text="Paste your game's Roblox link in Settings. RoStats shows its live stats right away, and you can upload Creator Dashboard exports for deeper analytics."
+          action={<Link to="/app/settings" className="btn btn-primary">Add a game</Link>}
+        />
+      </div>
+    )
+  }
 
   return (
     <div>
       <PageHeader
         title="Overview"
-        subtitle="Tower Escape Simulator, last 30 days"
-        actions={<><Segmented options={['7d', '14d', '30d']} value={range} onChange={setRange} /><button className="btn"><Download size={14} />Export</button></>}
+        subtitle={stats ? stats.name : 'Loading game'}
+        actions={stats && <a className="btn" href={`https://www.roblox.com/games/${stats.place_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />Open on Roblox</a>}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Visits" value="384,120" change={8.3} hint="vs previous period" />
-        <Stat label="Revenue" value="R$ 452,300" change={12.5} hint="about $1,583 USD" />
-        <Stat label="Avg session" value="42 min" change={5.2} hint="median 31 min" />
-        <Stat label="D1 retention" value="51%" change={3.1} hint="genre avg 44%" />
+      <div className="card p-5 flex flex-wrap items-center gap-5">
+        {stats?.icon ? <img src={stats.icon} alt="" className="h-16 w-16 rounded-xl bg-panel-2" /> : <div className="h-16 w-16 rounded-xl bg-panel-2" />}
+        <div className="min-w-0 flex-1">
+          <div className="text-lg font-semibold truncate">{stats?.name ?? '...'}</div>
+          <div className="text-xs text-muted">{stats?.genre ? `${stats.genre} · ` : ''}Live data from Roblox</div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-sm">
+          <div><div className="text-xs text-muted">Playing now</div><div className="text-lg font-semibold">{fmt(stats?.playing)}</div></div>
+          <div><div className="text-xs text-muted">Visits</div><div className="text-lg font-semibold">{fmt(stats?.visits)}</div></div>
+          <div><div className="text-xs text-muted">Favorites</div><div className="text-lg font-semibold">{fmt(stats?.favorites)}</div></div>
+          <div><div className="text-xs text-muted">Rating</div><div className="text-lg font-semibold">{stats?.rating != null ? `${stats.rating}%` : '-'}</div></div>
+        </div>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Card title="Visits and active players" subtitle="Daily totals" className="lg:col-span-2">
-          <div className="h-72">
-            <ResponsiveContainer>
-              <AreaChart data={data} margin={{ left: -10, right: 8 }}>
-                <defs>
-                  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#4f8cff" stopOpacity={0.35} /><stop offset="100%" stopColor="#4f8cff" stopOpacity={0} /></linearGradient>
-                  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#34d399" stopOpacity={0.3} /><stop offset="100%" stopColor="#34d399" stopOpacity={0} /></linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="day" tick={axisStyle} axisLine={false} tickLine={false} interval={Math.ceil(data.length / 8)} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} />
-                <Tooltip {...chartTooltip} />
-                <Area type="monotone" dataKey="visits" stroke="#4f8cff" fill="url(#v)" strokeWidth={2} name="Visits" />
-                <Area type="monotone" dataKey="players" stroke="#34d399" fill="url(#p)" strokeWidth={2} name="Players" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card title="Weekly activity" subtitle="Active vs new players">
-          <div className="h-72">
-            <ResponsiveContainer>
-              <BarChart data={weeklyActivity} margin={{ left: -20, right: 0 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="day" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} />
-                <Tooltip {...chartTooltip} cursor={{ fill: '#171e30' }} />
-                <Bar dataKey="active" fill="#4f8cff" radius={[4, 4, 0, 0]} name="Active" />
-                <Bar dataKey="newPlayers" fill="#a78bfa" radius={[4, 4, 0, 0]} name="New" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Card title="Your experiences" subtitle="Concurrent players right now">
-          <div className="space-y-3">
-            {games.map((g) => (
-              <div key={g.id} className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{g.name}</div>
-                  <div className="text-xs text-muted">{g.genre}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-medium">{g.players.toLocaleString()}</div>
-                  <div className="text-xs text-good">{g.rating}% rating</div>
-                </div>
+      <div className="mt-4">
+        {error && <p className="text-sm text-bad">{error}</p>}
+        {datasets == null && !error && <Spinner />}
+        {datasets && !datasets.length && <UploadPrompt what="Creator Dashboard" />}
+        {datasets && datasets.length > 0 && (
+          <>
+            <KpiRow datasets={datasets} />
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <Card title={datasets[0].name} subtitle={`Uploaded ${new Date(datasets[0].uploaded_at).toLocaleDateString()}`} className="lg:col-span-2">
+                <DatasetChart d={datasets[0]} />
+              </Card>
+              <InsightsCard focus="overview" />
+            </div>
+            {datasets.length > 1 && (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                {datasets.slice(1, 5).map((d) => (
+                  <Card key={d.id} title={d.name} subtitle={`${d.rows.length} rows`}><DatasetChart d={d} height={220} /></Card>
+                ))}
               </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card title="Top products" subtitle="By revenue, 30 days">
-          <table className="table w-full">
-            <thead><tr><th>Product</th><th className="text-right">Sales</th><th className="text-right">Robux</th></tr></thead>
-            <tbody>
-              {topProducts.slice(0, 4).map((p) => (
-                <tr key={p.name}>
-                  <td>{p.name}</td>
-                  <td className="text-right text-muted">{p.sales.toLocaleString()}</td>
-                  <td className="text-right font-medium">{(p.revenue / 1000).toFixed(0)}k</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-
-        <Card title="Recent incidents" subtitle="Last 24 hours" right={<Badge tone="warn">4 open</Badge>}>
-          <div className="space-y-3">
-            {crashLog.map((c) => (
-              <div key={c.time} className="flex gap-3">
-                <div className="text-xs text-muted w-10 shrink-0 pt-0.5">{c.time}</div>
-                <div className="min-w-0">
-                  <div className="text-sm truncate">{c.error}</div>
-                  <div className="text-xs text-muted">{c.server} · {c.count} occurrences</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
