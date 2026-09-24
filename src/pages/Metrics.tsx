@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Gamepad2 } from 'lucide-react'
-import { PageHeader, Card } from '../components/ui'
-import { DatasetChart, EmptyState, InsightsCard, Spinner, UploadPrompt } from '../components/data'
-import { MONEY_WORDS, PLAYER_WORDS, matches } from '../lib/data'
+import { Gamepad2, Upload } from 'lucide-react'
+import { PageHeader, Card, Segmented } from '../components/ui'
+import { DatasetChart, EmptyState, InsightsCard, RankedTable, Spinner, UploadPrompt } from '../components/data'
+import { MONEY_WORDS, PLAYER_WORDS, isTimeSeries, matches, numericColumns } from '../lib/data'
+import type { Dataset } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { KpiRow, useGameData } from './Overview'
 
@@ -23,11 +25,21 @@ const PAGES = {
   },
 } as const
 
+const RANGES = [{ label: '7D', days: 7 }, { label: '30D', days: 30 }, { label: '90D', days: 90 }, { label: 'All', days: 0 }]
+
+export function sliceDays(d: Dataset, days: number): Dataset {
+  if (!days || !isTimeSeries(d)) return d
+  return { ...d, rows: d.rows.slice(-days) }
+}
+
 export default function Metrics({ kind }: { kind: keyof typeof PAGES }) {
   const cfg = PAGES[kind]
   const { me, gameId } = useAuth()
-  const { datasets, error } = useGameData()
-  const mine = datasets?.filter((d) => matches(d, cfg.words)) ?? null
+  const { stats, datasets, error } = useGameData()
+  const [range, setRange] = useState('30D')
+  const days = RANGES.find((r) => r.label === range)!.days
+  const all = datasets?.filter((d) => matches(d, cfg.words)) ?? null
+  const mine = all?.map((d) => sliceDays(d, days)) ?? null
 
   if (!me?.games.length || !gameId) {
     return (
@@ -40,7 +52,14 @@ export default function Metrics({ kind }: { kind: keyof typeof PAGES }) {
 
   return (
     <div>
-      <PageHeader title={cfg.title} subtitle={cfg.subtitle} actions={<Link to="/app/data" className="btn">Import data</Link>} />
+      <PageHeader
+        title={cfg.title}
+        subtitle={`${stats?.name ?? 'Your game'} · ${range === 'All' ? 'all uploaded data' : `last ${days} days`}`}
+        actions={<>
+          {all && all.length > 0 && <Segmented options={RANGES.map((r) => r.label)} value={range} onChange={setRange} />}
+          <Link to="/app/data" className="btn"><Upload size={14} />Import</Link>
+        </>}
+      />
       {error && <p className="text-sm text-bad">{error}</p>}
       {mine == null && !error && <Spinner />}
       {mine && !mine.length && (
@@ -50,19 +69,32 @@ export default function Metrics({ kind }: { kind: keyof typeof PAGES }) {
         </>
       )}
       {mine && mine.length > 0 && (
-        <>
-          <KpiRow datasets={mine} />
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2 space-y-4">
-              {mine.map((d) => (
-                <Card key={d.id} title={d.name} subtitle={`${d.rows.length} rows · uploaded ${new Date(d.uploaded_at).toLocaleDateString()}`}>
-                  <DatasetChart d={d} />
-                </Card>
-              ))}
-            </div>
-            <div><InsightsCard focus={kind} datasetIds={mine.map((d) => d.id)} /></div>
-          </div>
-        </>
+        <DataBoard datasets={mine} focus={kind} ids={all!.map((d) => d.id)} />
+      )}
+    </div>
+  )
+}
+
+export function DataBoard({ datasets, focus, ids }: { datasets: Dataset[]; focus: 'overview' | 'players' | 'monetization'; ids?: number[] }) {
+  const series = datasets.filter(isTimeSeries)
+  const ranked = datasets.filter((d) => !isTimeSeries(d))
+  const score = (d: Dataset) => numericColumns(d).filter((c) => !c.isPercent).length * 10 + (/revenue|robux|active|dau/i.test(d.name) ? 5 : 0)
+  const ordered = [...series].sort((a, b) => score(b) - score(a))
+  const [main, ...rest] = ordered
+  return (
+    <div className="space-y-4">
+      <KpiRow datasets={ordered} limit={4} />
+      <div className="grid gap-4 xl:grid-cols-3">
+        {main
+          ? <Card title={main.name} subtitle={`${main.rows.length} days`} className="xl:col-span-2"><DatasetChart d={main} height={300} /></Card>
+          : <div className="xl:col-span-2" />}
+        <InsightsCard focus={focus} datasetIds={ids} />
+      </div>
+      {(ranked.length > 0 || rest.length > 0) && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {ranked.map((d) => <Card key={d.id} title={d.name} subtitle={`${d.rows.length} rows`}><RankedTable d={d} /></Card>)}
+          {rest.map((d) => <Card key={d.id} title={d.name} subtitle={`${d.rows.length} days`}><DatasetChart d={d} height={240} /></Card>)}
+        </div>
       )}
     </div>
   )

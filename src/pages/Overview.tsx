@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Gamepad2, ExternalLink } from 'lucide-react'
-import { PageHeader, Card, Stat } from '../components/ui'
-import { DatasetChart, EmptyState, InsightsCard, Spinner, UploadPrompt } from '../components/data'
+import { PageHeader, Stat } from '../components/ui'
+import { EmptyState, Spinner, UploadPrompt } from '../components/data'
+import { DataBoard, sliceDays } from './Metrics'
 import { api, fmt, type Dataset, type GameStats } from '../lib/api'
-import { kpi, numericColumns } from '../lib/data'
+import { columnValues, isTimeSeries, kpi, numericColumns } from '../lib/data'
 import { useAuth } from '../lib/auth'
 
 export function useGameData() {
@@ -26,25 +27,28 @@ export function useGameData() {
 }
 
 export function KpiRow({ datasets, limit = 8 }: { datasets: Dataset[]; limit?: number }) {
-  const tiles: { label: string; value: string; change?: number; hint: string }[] = []
-  for (const d of datasets) {
-    for (const c of numericColumns(d)) {
-      const k = kpi(d, Number(c.key))
-      if (!k) continue
-      tiles.push({
-        label: c.label,
-        value: c.isPercent && k.latest <= 100 ? `${fmt(k.latest)}%` : fmt(k.latest),
-        change: k.change,
-        hint: k.change != null ? `vs previous ${k.window} days` : d.name,
-      })
-      if (tiles.length >= limit) break
-    }
-    if (tiles.length >= limit) break
+  const tiles: { label: string; value: string; change?: number; hint: string; spark: number[]; unit: string }[] = []
+  // Round robin across files so the row shows one number from each before repeating a file.
+  const lists = datasets.filter(isTimeSeries).map((d) => numericColumns(d).map((c) => ({ d, c })))
+  const picks: { d: Dataset; c: ReturnType<typeof numericColumns>[number] }[] = []
+  for (let i = 0; picks.length < limit && lists.some((l) => l[i]); i++) for (const l of lists) if (l[i] && picks.length < limit) picks.push(l[i])
+  for (const { d, c } of picks) {
+    const k = kpi(d, Number(c.key))
+    if (!k) continue
+    const pct = c.isPercent && k.latest <= 100
+    tiles.push({
+      label: c.label,
+      value: pct ? `${fmt(k.latest)}%` : fmt(k.latest),
+      change: k.change,
+      hint: k.change != null ? `last ${k.window} days vs the ${k.window} before` : d.name,
+      spark: columnValues(d, Number(c.key)),
+      unit: '%',
+    })
   }
   if (!tiles.length) return null
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {tiles.map((t, i) => <Stat key={i} label={t.label} value={t.value} change={t.change} hint={t.hint} />)}
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+      {tiles.map((t, i) => <Stat key={i} label={t.label} value={t.value} change={t.change} hint={t.hint} spark={t.spark} changeUnit={t.unit} />)}
     </div>
   )
 }
@@ -67,51 +71,45 @@ export default function Overview() {
     )
   }
 
+  const live = [
+    { label: 'Playing now', value: fmt(stats?.playing), live: true },
+    { label: 'Total visits', value: fmt(stats?.visits) },
+    { label: 'Favorites', value: fmt(stats?.favorites) },
+    { label: 'Like ratio', value: stats?.rating != null ? `${stats.rating}%` : '-' },
+  ]
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Overview"
-        subtitle={stats ? stats.name : 'Loading game'}
+        subtitle={stats ? `${stats.name}${stats.creator ? ` by ${stats.creator}` : ''}` : 'Loading game'}
         actions={stats && <a className="btn" href={`https://www.roblox.com/games/${stats.place_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />Open on Roblox</a>}
       />
 
-      <div className="card p-5 flex flex-wrap items-center gap-5">
-        {stats?.icon ? <img src={stats.icon} alt="" className="h-16 w-16 rounded-xl bg-panel-2" /> : <div className="h-16 w-16 rounded-xl bg-panel-2" />}
-        <div className="min-w-0 flex-1">
-          <div className="text-lg font-semibold truncate">{stats?.name ?? '...'}</div>
-          <div className="text-xs text-muted">{stats?.genre ? `${stats.genre} · ` : ''}Live data from Roblox</div>
+      <div className="card flex flex-col gap-5 p-5 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 items-center gap-4 lg:w-80 lg:shrink-0">
+          {stats?.icon ? <img src={stats.icon} alt="" className="h-16 w-16 shrink-0 rounded-2xl bg-panel-2" /> : <div className="h-16 w-16 shrink-0 animate-pulse rounded-2xl bg-panel-2" />}
+          <div className="min-w-0">
+            <div className="truncate text-lg font-bold tracking-tight">{stats?.name ?? 'Loading'}</div>
+            <div className="truncate text-[13px] text-muted">{stats?.genre ? `${stats.genre} · ` : ''}Live from Roblox</div>
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-sm">
-          <div><div className="text-xs text-muted">Playing now</div><div className="text-lg font-semibold">{fmt(stats?.playing)}</div></div>
-          <div><div className="text-xs text-muted">Visits</div><div className="text-lg font-semibold">{fmt(stats?.visits)}</div></div>
-          <div><div className="text-xs text-muted">Favorites</div><div className="text-lg font-semibold">{fmt(stats?.favorites)}</div></div>
-          <div><div className="text-xs text-muted">Rating</div><div className="text-lg font-semibold">{stats?.rating != null ? `${stats.rating}%` : '-'}</div></div>
+        <div className="grid flex-1 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+          {live.map((l) => (
+            <div key={l.label} className="bg-bg px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-muted">
+                {l.live && <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-good" /></span>}
+                {l.label}
+              </div>
+              <div className="num mt-1 text-xl font-bold tracking-tight">{l.value}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="mt-4">
-        {error && <p className="text-sm text-bad">{error}</p>}
-        {datasets == null && !error && <Spinner />}
-        {datasets && !datasets.length && <UploadPrompt what="Creator Dashboard" />}
-        {datasets && datasets.length > 0 && (
-          <>
-            <KpiRow datasets={datasets} />
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              <Card title={datasets[0].name} subtitle={`Uploaded ${new Date(datasets[0].uploaded_at).toLocaleDateString()}`} className="lg:col-span-2">
-                <DatasetChart d={datasets[0]} />
-              </Card>
-              <InsightsCard focus="overview" />
-            </div>
-            {datasets.length > 1 && (
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                {datasets.slice(1, 5).map((d) => (
-                  <Card key={d.id} title={d.name} subtitle={`${d.rows.length} rows`}><DatasetChart d={d} height={220} /></Card>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      {datasets == null && !error && <Spinner />}
+      {datasets && !datasets.length && <UploadPrompt what="Creator Dashboard" />}
+      {datasets && datasets.length > 0 && <DataBoard datasets={datasets.map((d) => sliceDays(d, 30))} focus="overview" />}
     </div>
   )
 }

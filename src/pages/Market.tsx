@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, RefreshCw, Search, Sparkles, TrendingUp } from 'lucide-react'
+import { ExternalLink, RefreshCw, Search, Sparkles } from 'lucide-react'
 import { PageHeader, Card, Badge, Segmented } from '../components/ui'
 import { Spinner } from '../components/data'
 import { api, fmt, type Board, type Growth, type MarketAnalysis, type MarketSort, type Rising } from '../lib/api'
@@ -17,13 +17,13 @@ function GrowthBadge({ g }: { g?: Growth | null }) {
 }
 
 function Icon({ src, size = 'h-10 w-10' }: { src?: string; size?: string }) {
-  return src ? <img src={src} alt="" className={`${size} rounded-lg bg-panel-2 shrink-0`} /> : <div className={`${size} rounded-lg bg-panel-2 shrink-0`} />
+  return src ? <img src={src} alt="" className={`${size} shrink-0 rounded-xl bg-panel-2`} /> : <div className={`${size} shrink-0 rounded-xl bg-panel-2`} />
 }
 
 function PlayLink({ placeId }: { placeId?: string }) {
   if (!placeId) return null
   return (
-    <a className="btn px-2 py-1" href={`https://www.roblox.com/games/${placeId}`} target="_blank" rel="noreferrer" title="Open on Roblox">
+    <a className="btn px-2.5" href={`https://www.roblox.com/games/${placeId}`} target="_blank" rel="noreferrer" title="Open on Roblox">
       <ExternalLink size={12} />
     </a>
   )
@@ -44,6 +44,7 @@ function RisingTab() {
   const [error, setError] = useState<string | null>(null)
   const [ai, setAi] = useState<MarketAnalysis | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
 
   useEffect(() => {
     api.rising().then(setData).catch((e) => setError(e.message))
@@ -55,68 +56,99 @@ function RisingTab() {
   if (error) return <Card><p className="text-sm text-bad">{error}</p></Card>
   if (!data) return <Spinner label="Finding games that are taking off" />
 
+  const sel = data.games.find((g) => g.universe_id === picked) ?? data.games[0]
+  const note = sel ? notes.get(sel.universe_id) : undefined
+
   return (
     <div className="space-y-4">
-      {data.mode === 'new' && (
-        <div className="rounded-lg border border-line bg-panel p-3 text-xs text-muted">
-          RoStats started tracking player counts {data.history_hours < 1 ? 'less than an hour' : `${Math.round(data.history_hours)} hours`} ago.
-          Until there is a full day of history, this list shows young games from Roblox's Up-and-Coming chart. Growth numbers fill in automatically.
+      <div className="card flex gap-3 p-5">
+        <Sparkles size={18} className="mt-0.5 shrink-0 text-accent" />
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold tracking-tight">What's trending</div>
+          {ai ? <p className="mt-1 text-sm leading-relaxed text-muted">{ai.summary || 'No summary yet.'}</p>
+            : aiError ? <p className="mt-1 text-sm text-muted">{aiError}</p>
+            : <div className="mt-2"><Spinner label="AI is reading the games" /></div>}
         </div>
+      </div>
+
+      {data.mode === 'new' && (
+        <p className="text-xs text-muted">
+          Tracking started {data.history_hours < 1 ? 'less than an hour' : `${Math.round(data.history_hours)} hours`} ago. Until there is a full day of history, this list shows young games from Roblox's Up-and-Coming chart.
+        </p>
       )}
 
-      <Card title="What's trending" subtitle="AI read on the games below, refreshed every few hours">
-        {ai ? (
-          <p className="text-sm leading-relaxed">{ai.summary || 'No summary yet.'}</p>
-        ) : aiError ? (
-          <p className="text-sm text-muted">{aiError}</p>
-        ) : (
-          <Spinner label="Analyzing the games" />
-        )}
-      </Card>
+      {!data.games.length && <Card><p className="text-sm text-muted">No fast risers right now. Check back in a few hours.</p></Card>}
+      {data.games.length > 0 && (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
+          <div className="card overflow-hidden">
+            <div className="grid grid-cols-[2rem_minmax(0,1fr)_6rem_7rem] gap-3 border-b border-line px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-faint">
+              <span>#</span><span>Game</span><span className="text-right">Playing</span><span className="text-right">Growth</span>
+            </div>
+            {data.games.map((g, i) => {
+              const on = g.universe_id === sel?.universe_id
+              return (
+                <button
+                  key={g.universe_id}
+                  onClick={() => setPicked(g.universe_id)}
+                  className={`grid w-full grid-cols-[2rem_minmax(0,1fr)_6rem_7rem] items-center gap-3 border-b border-line px-5 py-3 text-left last:border-0 ${on ? 'bg-panel-2' : 'hover:bg-panel-2/50'}`}
+                >
+                  <span className="num text-sm text-muted">{i + 1}</span>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <Icon src={g.icon} size="h-10 w-10" />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-sm font-semibold">{g.name}</span>
+                        {g.age_days != null && g.age_days <= 60 && <Badge tone="accent">New</Badge>}
+                        {notes.has(g.universe_id) && <Sparkles size={12} className="shrink-0 text-accent" />}
+                      </span>
+                      <span className="block truncate text-xs text-muted">{[g.creator && `by ${g.creator}`, ageLabel(g.age_days), g.rating != null && `${g.rating}% liked`].filter(Boolean).join(' · ')}</span>
+                    </span>
+                  </span>
+                  <span className="num text-right text-sm font-semibold">{fmt(g.playing)}</span>
+                  <span className="text-right"><GrowthBadge g={g.growth} /></span>
+                </button>
+              )
+            })}
+          </div>
 
-      <div className="space-y-3">
-        {data.games.map((g, i) => {
-          const note = notes.get(g.universe_id)
-          return (
-            <div key={g.universe_id} className="card p-4">
-              <div className="flex items-start gap-3">
-                <span className="w-5 pt-2 text-sm text-muted">{i + 1}</span>
-                <Icon src={g.icon} size="h-14 w-14" />
+          {sel && (
+            <div className="card h-fit p-5 xl:sticky xl:top-0">
+              <div className="flex items-center gap-4">
+                <Icon src={sel.icon} size="h-16 w-16" />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium truncate">{g.name}</span>
-                    {g.age_days != null && g.age_days <= 60 && <Badge tone="accent">New</Badge>}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                    <span><span className="text-text font-medium">{fmt(g.playing)}</span> playing</span>
-                    <GrowthBadge g={g.growth} />
-                    {g.rating != null && <span>{g.rating}% liked</span>}
-                    {g.visits != null && <span>{fmt(g.visits)} visits</span>}
-                    {ageLabel(g.age_days) && <span>{ageLabel(g.age_days)}</span>}
-                    {g.creator && <span>by {g.creator}</span>}
-                  </div>
+                  <div className="truncate text-lg font-bold tracking-tight">{sel.name}</div>
+                  <div className="truncate text-[13px] text-muted">{sel.creator ? `by ${sel.creator}` : 'Roblox game'}</div>
                 </div>
-                <PlayLink placeId={g.place_id} />
+                <PlayLink placeId={sel.place_id} />
               </div>
-              {note && (
-                <div className="mt-3 ml-8 rounded-lg border border-line bg-bg p-3 text-sm">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-accent"><Sparkles size={12} />Why it's growing</div>
-                  <p className="mt-1 leading-relaxed">{note.why}</p>
+              <div className="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line">
+                {[['Playing', fmt(sel.playing)], ['Liked', sel.rating != null ? `${sel.rating}%` : '-'], ['Visits', sel.visits != null ? fmt(sel.visits) : '-']].map(([l, v]) => (
+                  <div key={l} className="bg-bg px-3 py-2.5"><div className="text-xs text-muted">{l}</div><div className="num mt-0.5 font-bold">{v}</div></div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs"><GrowthBadge g={sel.growth} /></div>
+              {note ? (
+                <div className="mt-5 space-y-4">
+                  <div>
+                    <div className="label mb-1.5 flex items-center gap-1.5"><Sparkles size={12} className="text-accent" />Why it's growing</div>
+                    <p className="text-sm leading-relaxed">{note.why}</p>
+                  </div>
                   {note.copy.length > 0 && (
-                    <>
-                      <div className="mt-2 text-xs font-medium text-muted">What you can take from it</div>
-                      <ul className="mt-1 list-disc pl-5 space-y-0.5">
-                        {note.copy.map((c) => <li key={c}>{c}</li>)}
+                    <div>
+                      <div className="label mb-1.5">What you can take from it</div>
+                      <ul className="space-y-2">
+                        {note.copy.map((c) => <li key={c} className="flex gap-2.5 text-sm leading-relaxed"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-good" />{c}</li>)}
                       </ul>
-                    </>
+                    </div>
                   )}
                 </div>
+              ) : (
+                <p className="mt-5 text-sm text-muted">{ai ? 'No AI notes for this game yet. They cover the fastest risers and refresh every few hours.' : 'AI notes load with the trend summary.'}</p>
               )}
             </div>
-          )
-        })}
-        {!data.games.length && <Card><p className="text-sm text-muted">No fast risers right now. Check back in a few hours.</p></Card>}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -144,22 +176,24 @@ function LeaderboardsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {cats.map((c) => (
-          <button key={c} onClick={() => pick(c)} className={`btn text-xs ${active === c ? 'btn-primary' : ''}`}>{c}</button>
-        ))}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        <div className="flex flex-1 flex-wrap gap-1.5">
+          {cats.map((c) => (
+            <button key={c} onClick={() => pick(c)} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${active === c ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:border-line-strong hover:text-text'}`}>{c}</button>
+          ))}
+        </div>
+        <form className="relative w-full lg:w-72" onSubmit={(e) => { e.preventDefault(); search() }}>
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input className="input pl-9" placeholder="Search a genre, like fishing" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </form>
       </div>
-      <form className="flex gap-2 max-w-md" onSubmit={(e) => { e.preventDefault(); search() }}>
-        <input className="input" placeholder="Any keyword, like 'fishing' or 'mining'" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <button className="btn shrink-0" type="submit" disabled={!query.trim()}><Search size={14} />Search</button>
-      </form>
 
       {error && <Card><p className="text-sm text-bad">{error}</p></Card>}
       {loading && <Spinner label="Loading leaderboard" />}
       {board && !loading && (
         <Card
           title={`Top "${board.name}" games`}
-          subtitle={`By players right now · updated ${new Date(board.updated * 1000).toLocaleTimeString()}`}
+          subtitle={`By players right now · updated ${new Date(board.updated * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
         >
           <div className="overflow-x-auto">
             <table className="table w-full">
@@ -241,12 +275,11 @@ export default function Market() {
       <PageHeader
         title="Market Trends"
         subtitle="Games that are taking off, why, and who leads each genre"
-        actions={<button className="btn" onClick={() => setKey((k) => k + 1)}><RefreshCw size={14} />Refresh</button>}
+        actions={<>
+          <Segmented options={TABS} value={tab} onChange={setTab} />
+          <button className="btn px-2.5" onClick={() => setKey((k) => k + 1)} title="Refresh" aria-label="Refresh"><RefreshCw size={14} /></button>
+        </>}
       />
-      <div className="mb-4 flex items-center gap-3">
-        <TrendingUp size={16} className="text-muted" />
-        <Segmented options={TABS} value={tab} onChange={setTab} />
-      </div>
       <div key={`${tab}-${key}`}>
         {tab === TABS[0] && <RisingTab />}
         {tab === TABS[1] && <LeaderboardsTab />}

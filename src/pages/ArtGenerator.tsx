@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Sparkles, Download, RefreshCw, Image as ImageIcon, Upload, X, Eye, Play, ThumbsUp, Users } from 'lucide-react'
-import { PageHeader, Card, Badge, Segmented } from '../components/ui'
+import { Sparkles, Download, RefreshCw, Image as ImageIcon, X, Eye, Play, ThumbsUp, Users, Plus } from 'lucide-react'
+import { PageHeader } from '../components/ui'
 import { ProGate, Spinner } from '../components/data'
 import { api, fileToDataUrl, fmt, type Generation, type HomeGame } from '../lib/api'
 import { useAuth } from '../lib/auth'
@@ -93,15 +93,35 @@ function HomeMenuTest({ format, image, onClose }: { format: Format; image: strin
   )
 }
 
+const STYLE_INFO: Record<Style, string> = { Cartoon: 'Bold outlines, bright color', Anime: 'Cel shading, dynamic poses' }
+const FORMAT_INFO: Record<Format, { sub: string; box: string }> = {
+  Thumbnail: { sub: '16:9', box: 'h-3.5 w-6' },
+  Icon: { sub: '1:1', box: 'h-5 w-5' },
+  Vector: { sub: 'clear bg', box: 'h-5 w-5 border-dashed' },
+}
+const CHIPS = ['Big bold title space', 'Shocked face', 'Before and after', 'Bright sky', 'Close-up character']
+
+function OptionCard({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex min-w-0 flex-1 flex-col rounded-xl border p-3 text-left transition-colors ${on ? 'border-accent bg-accent-soft/60' : 'border-line bg-bg hover:border-line-strong'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function ArtGenerator() {
-  const { me, refresh } = useAuth()
+  const { me, refresh, gameId } = useAuth()
   const [format, setFormat] = useState<Format>('Thumbnail')
   const [style, setStyle] = useState<Style>('Cartoon')
   const [changes, setChanges] = useState('')
   const [refs, setRefs] = useState<{ name: string; dataUrl: string }[]>([])
-  const [count, setCount] = useState(1)
+  const [count, setCount] = useState(2)
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<string[]>([])
+  const [selected, setSelected] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [testImage, setTestImage] = useState<string | null>(null)
   const [history, setHistory] = useState<Generation[] | null>(null)
@@ -110,10 +130,13 @@ export default function ArtGenerator() {
   const loadHistory = () => { api.artHistory().then((r) => setHistory(r.data)).catch(() => setHistory([])) }
   useEffect(loadHistory, [])
 
-  if (me?.plan !== 'pro') return (<div><PageHeader title="Art Generator" /><ProGate feature="The Art Generator" /></div>)
+  if (me?.plan !== 'pro') return (<div><PageHeader title="Art Generator" subtitle="Thumbnails, icons and vectors for your game" /><ProGate feature="The Art Generator" /></div>)
 
   const credits = me.credits.total
+  const n = Math.min(count, credits)
   const ratio = format === 'Thumbnail' ? 'aspect-video' : 'aspect-square'
+  const current = results[selected]
+  const game = me.games.find((g) => g.universe_id === gameId)?.name
 
   const addFiles = async (files: FileList | null) => {
     if (!files) return
@@ -124,8 +147,7 @@ export default function ArtGenerator() {
   }
 
   const generate = async () => {
-    setBusy(true); setError(null); setResults([])
-    const n = Math.min(count, credits)
+    setBusy(true); setError(null); setResults([]); setSelected(0)
     try {
       for (let i = 0; i < n; i++) {
         const r = await api.art({ changes, style, kind: format, images: refs.map((x) => x.dataUrl) })
@@ -140,90 +162,160 @@ export default function ArtGenerator() {
     }
   }
 
+  const addChip = (c: string) => setChanges((t) => (t.trim() ? `${t.trim().replace(/[,.]$/, '')}, ${c.toLowerCase()}` : c))
+
   return (
-    <div>
-      <PageHeader title="Art Generator" subtitle="Thumbnails, icons and vector art from your own reference images" actions={<Badge tone={credits ? 'accent' : 'warn'}>{credits} credits left</Badge>} />
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[auto_1fr]">
+      <PageHeader
+        title="Art Generator"
+        subtitle={`Thumbnails, icons and vectors${game ? ` for ${game}` : ''}`}
+        actions={<>
+          {current && format !== 'Vector' && <button className="btn" onClick={() => setTestImage(current)}><Eye size={14} />Home menu test</button>}
+          {current && <a className="btn" href={current} download={`rostats-${format.toLowerCase()}-${selected + 1}.png`}><Download size={14} />Download</a>}
+        </>}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Reference images" subtitle="Screenshots from Studio, old thumbnails, sketches">
-          <div className="space-y-2">
-            {refs.map((r) => (
-              <div key={r.name} className="flex items-center gap-3 rounded-lg border border-line bg-bg p-2">
-                <img src={r.dataUrl} alt="" className="h-10 w-14 rounded-md object-cover" />
-                <span className="text-xs flex-1 truncate">{r.name}</span>
-                <button className="text-muted hover:text-text" onClick={() => setRefs(refs.filter((x) => x !== r))}><X size={14} /></button>
+      <div className="min-w-0 space-y-5">
+        <div className={`${ratio} ${format === 'Thumbnail' ? 'w-full' : 'mx-auto w-full max-w-[560px]'} relative overflow-hidden rounded-2xl border border-line bg-panel dot-bg`}>
+          {current
+            ? <img src={current} alt="Generated image" className="absolute inset-0 h-full w-full object-cover" />
+            : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+                {busy ? <RefreshCw size={24} className="animate-spin text-accent" /> : <ImageIcon size={26} className="text-faint" />}
+                <div className="text-sm font-semibold">{busy ? `Rendering ${results.length + 1} of ${n}` : 'Your image appears here'}</div>
+                {!busy && <div className="max-w-sm text-[13px] text-muted">Describe what you want on the right, pick a style and a format, then generate. Each image uses 1 credit.</div>}
               </div>
-            ))}
-            <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
-            {refs.length < 4 && (
-              <button className="w-full rounded-lg border border-dashed border-line p-4 text-center text-xs text-muted hover:text-text" onClick={() => fileInput.current?.click()}>
-                <Upload size={16} className="mx-auto mb-1" />Add image (up to 4, optional)
-              </button>
             )}
-          </div>
+          {current && <span className="absolute bottom-3 left-3 rounded-lg bg-black/70 px-2.5 py-1 text-xs font-semibold text-white">{style} · {format}</span>}
+        </div>
 
-          <div className="mt-4">
-            <div className="text-xs text-muted mb-1.5">{refs.length ? 'What to change' : 'Describe the image'}</div>
-            <textarea className="input h-24 resize-none" value={changes} onChange={(e) => setChanges(e.target.value)} placeholder={refs.length ? 'Example: make the tower taller, add lava at the bottom, avatar jumping in the center' : 'Example: neon obby tower over lava, excited avatar jumping, bright sky'} />
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            <div>
-              <div className="text-xs text-muted mb-1.5">Style</div>
-              <Segmented options={styles} value={style} onChange={(v) => setStyle(v as Style)} />
-            </div>
-            <div>
-              <div className="text-xs text-muted mb-1.5">Type</div>
-              <Segmented options={formats} value={format} onChange={(v) => setFormat(v as Format)} />
-            </div>
-            <div>
-              <div className="text-xs text-muted mb-1.5">Variants</div>
-              <Segmented options={['1', '2', '4']} value={String(count)} onChange={(v) => setCount(Number(v))} />
-            </div>
-          </div>
-
-          <button className="btn btn-primary mt-4 w-full justify-center" onClick={generate} disabled={busy || !changes.trim() || !credits}>
-            {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {busy ? `Generating ${results.length + 1} of ${Math.min(count, credits)}` : `Generate (${Math.min(count, credits)} ${Math.min(count, credits) === 1 ? 'credit' : 'credits'})`}
-          </button>
-          {!credits && <p className="mt-2 text-center text-xs text-warn">No credits left this month.</p>}
-          {error && <p className="mt-2 text-center text-xs text-bad">{error}</p>}
-        </Card>
-
-        <Card title="Results" subtitle={results.length ? 'Download one, or test how it looks on the Roblox home menu' : 'Your images will appear here'} className="lg:col-span-2">
-          <div className={`grid gap-3 ${format === 'Thumbnail' ? 'sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
-            {Array.from({ length: Math.max(results.length, busy ? Math.min(count, credits) : 1) }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-line p-2">
+        {(results.length > 1 || (busy && n > 1)) && (
+          <div className="flex flex-wrap gap-3">
+            {Array.from({ length: Math.max(results.length, busy ? n : 0) }).map((_, i) => (
+              <button
+                key={i}
+                onClick={() => results[i] && setSelected(i)}
+                className={`${format === 'Thumbnail' ? 'w-44' : 'w-28'} rounded-xl border p-1 ${i === selected ? 'border-accent' : 'border-line hover:border-line-strong'}`}
+              >
                 {results[i]
                   ? <img src={results[i]} alt="" className={`${ratio} w-full rounded-lg object-cover`} />
-                  : <Tile ratio={ratio}><div className={`flex flex-col items-center gap-1.5 text-muted ${busy ? 'animate-pulse' : ''}`}><ImageIcon size={20} /><span className="text-[11px]">{busy ? 'Rendering' : 'Empty'}</span></div></Tile>}
-                {results[i] && (
-                  <div className="mt-2 flex items-center justify-end gap-1">
-                    {format !== 'Vector' && <button className="btn px-2 py-1 text-xs" onClick={() => setTestImage(results[i])}><Eye size={12} />Home menu test</button>}
-                    <a className="btn px-2 py-1" href={results[i]} download={`rostats-${format.toLowerCase()}-${i + 1}.png`}><Download size={12} /></a>
-                  </div>
-                )}
-              </div>
+                  : <div className={`${ratio} w-full animate-pulse rounded-lg bg-panel-2`} />}
+              </button>
             ))}
           </div>
-        </Card>
+        )}
+
+        {current && format !== 'Vector' && (
+          <button onClick={() => setTestImage(current)} className="flex w-full items-start gap-3 rounded-xl border border-line bg-panel p-4 text-left hover:border-line-strong">
+            <Eye size={16} className="mt-0.5 shrink-0 text-accent" />
+            <span>
+              <span className="block text-sm font-semibold">Will it stand out on the home menu?</span>
+              <span className="block text-[13px] text-muted">Hide it between games trending on Roblox right now and see if you can spot it first.</span>
+            </span>
+          </button>
+        )}
+
       </div>
 
-      <div className="mt-4">
-        <Card title="Previous generations" subtitle="Your last 12 images">
-          {!history && <Spinner />}
-          {history && !history.length && <p className="text-sm text-muted">Nothing generated yet.</p>}
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {history?.map((h) => (
-              <a key={h.id} href={api.artImageUrl(h.id)} target="_blank" rel="noreferrer" className="rounded-lg border border-line p-2 hover:bg-panel-2">
-                <img src={api.artImageUrl(h.id)} alt="" loading="lazy" className={`${h.kind === 'Thumbnail' ? 'aspect-video' : 'aspect-square'} w-full rounded-lg object-cover bg-panel-2`} />
-                <div className="mt-2 text-xs truncate" title={h.prompt}>{h.prompt}</div>
-                <div className="mt-1 flex items-center justify-between text-[11px] text-muted"><span>{h.style} · {h.kind}</span><span>{new Date(h.created_at).toLocaleDateString()}</span></div>
-              </a>
-            ))}
+      <aside className="card flex h-fit flex-col xl:sticky xl:top-0 xl:row-span-2">
+        <div className="space-y-5 p-5">
+          <div>
+            <div className="label mb-2">Prompt</div>
+            <textarea
+              className="input h-28 resize-none text-sm leading-relaxed"
+              value={changes}
+              onChange={(e) => setChanges(e.target.value)}
+              placeholder={refs.length ? 'What to change. Example: make the tower taller, add lava at the bottom' : 'Example: a noob at level 1 next to a buff pro at level 99, bright sky'}
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {CHIPS.map((c) => (
+                <button key={c} onClick={() => addChip(c)} className="rounded-full border border-line px-2.5 py-1 text-xs text-muted hover:border-line-strong hover:text-text">+ {c}</button>
+              ))}
+            </div>
           </div>
-        </Card>
-      </div>
+
+          <div>
+            <div className="mb-2 flex items-baseline justify-between"><span className="label">Reference images</span><span className="text-xs text-faint">{refs.length} of 4</span></div>
+            <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
+            <div className="grid grid-cols-4 gap-2">
+              {refs.map((r) => (
+                <div key={r.name} className="relative">
+                  <img src={r.dataUrl} alt={r.name} className="aspect-square w-full rounded-lg object-cover" />
+                  <button onClick={() => setRefs(refs.filter((x) => x !== r))} className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-panel text-muted hover:text-text" aria-label="Remove image"><X size={11} /></button>
+                </div>
+              ))}
+              {refs.length < 4 && (
+                <button onClick={() => fileInput.current?.click()} className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-line-strong text-muted hover:text-text" aria-label="Add reference image"><Plus size={18} /></button>
+              )}
+            </div>
+            {!refs.length && <p className="mt-2 text-xs text-faint">Optional. Studio screenshots or an old thumbnail work best.</p>}
+          </div>
+
+          <div>
+            <div className="label mb-2">Style</div>
+            <div className="flex gap-2">
+              {styles.map((st) => (
+                <OptionCard key={st} on={style === st} onClick={() => setStyle(st)}>
+                  <span className="text-sm font-semibold">{st}</span>
+                  <span className="mt-0.5 text-xs text-muted">{STYLE_INFO[st]}</span>
+                </OptionCard>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="label mb-2">Format</div>
+            <div className="flex gap-2">
+              {formats.map((f) => (
+                <OptionCard key={f} on={format === f} onClick={() => { setFormat(f); setResults([]) }}>
+                  <span className="flex h-6 items-center"><span className={`${FORMAT_INFO[f].box} rounded-[4px] border-[1.5px] ${format === f ? 'border-accent' : 'border-muted'}`} /></span>
+                  <span className="mt-1.5 text-sm font-semibold">{f}</span>
+                  <span className="text-xs text-muted">{FORMAT_INFO[f].sub}</span>
+                </OptionCard>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="label mb-2">Variants</div>
+            <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-bg p-1">
+              {[1, 2, 4].map((v) => (
+                <button key={v} onClick={() => setCount(v)} className={`rounded-lg py-1.5 text-sm font-semibold ${count === v ? 'bg-panel-2 text-text' : 'text-muted hover:text-text'}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-line p-5">
+          <button className="btn btn-primary w-full justify-center py-3 text-sm" onClick={generate} disabled={busy || !changes.trim() || !credits}>
+            {busy ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {busy ? `Generating ${results.length + 1} of ${n}` : `Generate ${n} ${n === 1 ? 'image' : 'images'}`}
+          </button>
+          <div className="mt-2 flex justify-between text-xs text-muted">
+            <span>Uses {n} {n === 1 ? 'credit' : 'credits'}</span>
+            <span className="num">{credits} left</span>
+          </div>
+          {!credits && <p className="mt-2 text-xs text-warn">No credits left this month. Buy a credit pack on the Subscription page.</p>}
+          {error && <p className="mt-2 text-xs text-bad">{error}</p>}
+        </div>
+      </aside>
+
+      <section className="min-w-0">
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-[15px] font-semibold tracking-tight">History</h2>
+          <span className="text-xs text-muted">Last 12 images</span>
+        </div>
+        {!history && <Spinner />}
+        {history && !history.length && <p className="text-sm text-muted">Nothing generated yet.</p>}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
+          {history?.map((h) => (
+            <a key={h.id} href={api.artImageUrl(h.id)} target="_blank" rel="noreferrer" className="group min-w-0">
+              <img src={api.artImageUrl(h.id)} alt="" loading="lazy" className={`${h.kind === 'Thumbnail' ? 'aspect-video' : 'aspect-square'} w-full rounded-xl border border-line bg-panel-2 object-cover group-hover:border-line-strong`} />
+              <div className="mt-1.5 truncate text-xs text-muted" title={h.prompt}>{h.prompt}</div>
+            </a>
+          ))}
+        </div>
+      </section>
 
       {testImage && <HomeMenuTest format={format} image={testImage} onClose={() => setTestImage(null)} />}
     </div>

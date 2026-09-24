@@ -92,4 +92,21 @@ export function matches(d: Dataset, re: RegExp) {
   return re.test(d.name) || d.columns.some((c) => re.test(c))
 }
 
-export const SERIES_COLORS = ['#4f8cff', '#34d399', '#fbbf24', '#a78bfa', '#f87171', '#22d3ee']
+export const SERIES_COLORS = ['var(--accent)', 'var(--violet)', 'var(--good)', 'var(--warn)', 'var(--bad)', '#22d3ee']
+
+// True when the first column holds dates, so the file is a daily or weekly series.
+export function isTimeSeries(d: Dataset) {
+  const vals = d.rows.slice(0, 20).map((r) => String(r[0] ?? '')).filter(Boolean)
+  return vals.length > 0 && vals.filter((v) => /\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?/.test(v) && !Number.isNaN(Date.parse(v.replace(/\./g, '-')))).length >= vals.length * 0.8
+}
+
+// Values of one column, in order, for sparklines.
+export function columnValues(d: Dataset, colIndex: number, last = 30) {
+  return d.rows.map((r) => toNumber(r[colIndex])).filter((v): v is number => v != null).slice(-last)
+}
+
+// Short date label: "Sep 12".
+export function shortDate(v: string) {
+  const t = Date.parse(v)
+  return Number.isNaN(t) ? v : new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}

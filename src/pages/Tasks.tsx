@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Calendar, Gamepad2, AlignLeft, Plus, Trash2, X } from 'lucide-react'
-import { PageHeader } from '../components/ui'
+import { PageHeader, Segmented } from '../components/ui'
 import { Spinner } from '../components/data'
 import { api, type Task, type TaskStatus, type Team, type TeamMember } from '../lib/api'
 import { useAuth } from '../lib/auth'
@@ -171,10 +171,14 @@ export default function Tasks() {
         title="Tasks"
         subtitle={team ? `Shared board for ${team.name}` : 'Your personal board. Team boards are shared with everyone in the team.'}
         actions={
-          <select className="input w-56" value={board} onChange={(e) => setParams(e.target.value ? { team: e.target.value } : {})}>
-            <option value="">Personal board</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          teams.length <= 3
+            ? <Segmented options={['Personal', ...teams.map((t) => t.name)]} value={team?.name ?? 'Personal'} onChange={(v) => { const t = teams.find((x) => x.name === v); setParams(t ? { team: t.id } : {}) }} />
+            : (
+              <select className="input w-56" value={board} onChange={(e) => setParams(e.target.value ? { team: e.target.value } : {})}>
+                <option value="">Personal board</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )
         }
       />
       {error && <p className="mb-3 text-sm text-bad">{error}</p>}
@@ -186,17 +190,17 @@ export default function Tasks() {
             return (
               <div
                 key={c.key}
-                className={`flex min-h-[320px] flex-col rounded-xl border bg-panel p-3 ${over === c.key ? 'border-accent' : 'border-line'}`}
+                className={`flex min-h-[320px] flex-col rounded-2xl border p-3 transition-colors ${over === c.key ? 'border-accent bg-accent-soft/30' : 'border-line bg-panel/60'}`}
                 onDragOver={(e) => { e.preventDefault(); setOver(c.key) }}
                 onDragLeave={() => setOver((o) => (o === c.key ? null : o))}
                 onDrop={drop(c.key, null)}
               >
                 <div className="mb-3 flex items-center gap-2 px-1">
                   <span className={`h-2 w-2 rounded-full ${c.dot}`} />
-                  <span className="text-sm font-medium">{c.label}</span>
-                  <span className="text-xs text-muted">{list.length}</span>
+                  <span className="text-sm font-semibold">{c.label}</span>
+                  <span className="num ml-auto rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{list.length}</span>
                 </div>
-                <div className="flex-1 space-y-2">
+                <div className="space-y-2">
                   {list.map((t) => {
                     const m = memberById(t.assignee_id)
                     const g = games.find((x) => x.universe_id === t.universe_id)
@@ -209,7 +213,7 @@ export default function Tasks() {
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={drop(c.key, t.id)}
                         onClick={() => setOpen(t)}
-                        className={`cursor-pointer rounded-lg border border-line bg-bg p-3 text-sm hover:border-accent ${dragId === t.id ? 'opacity-40' : ''}`}
+                        className={`cursor-pointer rounded-xl border border-line bg-panel p-3 text-sm shadow-sm hover:border-line-strong ${dragId === t.id ? 'opacity-40' : ''}`}
                       >
                         <div className={`font-medium ${t.status === 'done' ? 'text-muted line-through' : ''}`}>{t.title}</div>
                         {(t.due || g || t.notes || m) && (
@@ -226,8 +230,8 @@ export default function Tasks() {
                 </div>
                 <form className="mt-2 flex gap-1" onSubmit={(e) => { e.preventDefault(); add(c.key) }}>
                   <input
-                    className="input py-1.5 text-xs"
-                    placeholder="Add a task"
+                    className="input border-dashed bg-transparent py-2 text-[13px]"
+                    placeholder="+ Add a task"
                     value={adding[c.key] || ''}
                     onChange={(e) => setAdding((a) => ({ ...a, [c.key]: e.target.value }))}
                     maxLength={200}
