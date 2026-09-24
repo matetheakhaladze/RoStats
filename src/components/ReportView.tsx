@@ -2,7 +2,7 @@ import { Card, Stat } from './ui'
 import { DatasetChart } from './data'
 import { KpiRow } from '../pages/Overview'
 import { fmt, type Dataset, type Report } from '../lib/api'
-import { matches, MONEY_WORDS, PLAYER_WORDS } from '../lib/data'
+import { isTimeSeries, matches, MONEY_WORDS, PLAYER_WORDS } from '../lib/data'
 
 export const PERIODS = [
   { days: 1, label: 'Last day' },
@@ -41,7 +41,7 @@ function Section({ title, sets, tables }: { title: string; sets: Dataset[]; tabl
       {sets.map((d) => (
         <Card key={d.id} title={d.name} subtitle={`${d.rows.length} rows`}>
           <div className="print-avoid"><DatasetChart d={d} height={220} /></div>
-          {tables && <DataTable d={d} />}
+          {tables && isTimeSeries(d) && <DataTable d={d} />}
         </Card>
       ))}
     </section>

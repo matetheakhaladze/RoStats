@@ -64,6 +64,7 @@ export type GameStats = {
   dislikes?: number
   rating?: number | null
   icon?: string
+  creator?: string
   genre?: string
   updated?: string
   created?: string

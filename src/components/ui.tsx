@@ -1,16 +1,27 @@
-import type { ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+export const HeaderSlot = createContext<HTMLElement | null | undefined>(undefined)
+
+function HeaderContent({ title, subtitle, actions, inline }: { title: string; subtitle?: string; actions?: ReactNode; inline?: boolean }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-      <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
-        {subtitle && <p className="text-sm text-muted mt-1">{subtitle}</p>}
+    <div className={`flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 ${inline ? 'mb-6' : ''}`}>
+      <div className="min-w-0">
+        <h1 className={`${inline ? 'text-xl' : 'text-lg'} truncate font-semibold tracking-tight`}>{title}</h1>
+        {subtitle && <p className="truncate text-[13px] text-muted">{subtitle}</p>}
       </div>
-      {actions && <div className="flex gap-2">{actions}</div>}
+      {actions && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   )
+}
+
+// Renders the page title and actions in the app top bar when inside the app shell, inline otherwise.
+export function PageHeader(props: { title: string; subtitle?: string; actions?: ReactNode }) {
+  const slot = useContext(HeaderSlot)
+  if (slot === null) return null
+  if (slot) return createPortal(<HeaderContent {...props} />, slot)
+  return <HeaderContent {...props} inline />
 }
 
 export function Card({ title, subtitle, children, className = '', right }: { title?: string; subtitle?: string; children: ReactNode; className?: string; right?: ReactNode }) {
@@ -19,7 +30,7 @@ export function Card({ title, subtitle, children, className = '', right }: { tit
       {(title || right) && (
         <div className="flex items-start justify-between mb-4">
           <div>
-            {title && <h2 className="text-sm font-semibold">{title}</h2>}
+            {title && <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>}
             {subtitle && <p className="text-xs text-muted mt-0.5">{subtitle}</p>}
           </div>
           {right}
@@ -30,21 +41,36 @@ export function Card({ title, subtitle, children, className = '', right }: { tit
   )
 }
 
-export function Stat({ label, value, change, hint }: { label: string; value: string; change?: number; hint?: string }) {
+export function Sparkline({ values, tone = 'good', width = 120, height = 36 }: { values: number[]; tone?: 'good' | 'bad' | 'accent'; width?: number; height?: number }) {
+  if (values.length < 2) return null
+  const min = Math.min(...values), max = Math.max(...values)
+  const span = max - min || 1
+  const pts = values.map((v, i) => `${((i / (values.length - 1)) * width).toFixed(1)},${(height - 3 - ((v - min) / span) * (height - 6)).toFixed(1)}`)
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0 overflow-visible" aria-hidden="true">
+      <polyline points={pts.join(' ')} fill="none" stroke={`var(--${tone})`} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function Stat({ label, value, change, hint, spark, changeUnit = '%' }: { label: string; value: string; change?: number; hint?: string; spark?: number[]; changeUnit?: string }) {
   const up = (change ?? 0) >= 0
   return (
-    <div className="card p-5">
-      <div className="text-xs text-muted">{label}</div>
-      <div className="text-2xl font-semibold mt-2">{value}</div>
-      <div className="flex items-center gap-2 mt-2 text-xs">
+    <div className="card flex min-w-0 flex-col gap-2 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+        <span className="min-w-0 truncate text-[13px] text-muted">{label}</span>
         {change !== undefined && (
-          <span className={`inline-flex items-center gap-0.5 font-medium ${up ? 'text-good' : 'text-bad'}`}>
-            {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-            {Math.abs(change)}%
+          <span className={`num inline-flex shrink-0 items-center gap-0.5 text-xs font-semibold ${up ? 'text-good' : 'text-bad'}`}>
+            {up ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+            {up ? '+' : '-'}{Math.abs(change)}{changeUnit}
           </span>
         )}
-        {hint && <span className="text-muted">{hint}</span>}
       </div>
+      <div className="flex items-end justify-between gap-3">
+        <span className="num text-[22px] font-bold leading-none tracking-tight sm:text-[28px]">{value}</span>
+        {spark && <span className="hidden sm:block"><Sparkline values={spark} tone={up ? 'good' : 'bad'} /></span>}
+      </div>
+      {hint && <div className="truncate text-xs text-faint">{hint}</div>}
     </div>
   )
 }
@@ -71,12 +97,12 @@ export function Progress({ value, tone = 'accent' }: { value: number; tone?: 'ac
 
 export function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-line bg-bg p-0.5">
+    <div className="inline-flex rounded-[10px] border border-line bg-panel p-0.5">
       {options.map((o) => (
         <button
           key={o}
           onClick={() => onChange(o)}
-          className={`px-3 py-1 text-xs rounded-md transition-colors ${value === o ? 'bg-panel-2 text-text' : 'text-muted hover:text-text'}`}
+          className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${value === o ? 'bg-panel-2 text-text' : 'text-muted hover:text-text'}`}
         >
           {o}
         </button>
