@@ -178,6 +178,16 @@ create table if not exists tasks (
 );
 create index if not exists tasks_team on tasks(team_id);
 create index if not exists tasks_owner on tasks(owner_id);
+alter table datasets add column if not exists source text;
+create table if not exists roblox_links (
+  user_id bigint not null references users(id) on delete cascade,
+  universe_id bigint not null,
+  key_enc text not null,
+  created_at timestamptz not null default now(),
+  last_sync timestamptz,
+  last_error text,
+  primary key (user_id, universe_id)
+);
 create table if not exists market_cache (
   key text primary key,
   value jsonb not null,
@@ -438,7 +448,7 @@ def _can_view_game(conn, uid: int, universe_id: int) -> bool:
 
 
 def _datasets_for(conn, uid: int, universe_id: str | int | None, limit: int | None = None):
-    cols = "d.id, d.user_id, d.universe_id, d.name, d.columns, d.rows, d.uploaded_at, u.name as owner_name"
+    cols = "d.id, d.user_id, d.universe_id, d.name, d.columns, d.rows, d.uploaded_at, d.source, u.name as owner_name"
     if universe_id:
         owners = _data_owners(conn, uid, int(universe_id))
         q = (f"select {cols} from datasets d join users u on u.id = d.user_id "
@@ -610,7 +620,7 @@ async def list_datasets(universe_id: str | None = None, user: dict = Depends(cur
     return {"data": [
         {"id": r["id"], "universe_id": str(r["universe_id"]) if r["universe_id"] else None, "name": r["name"],
          "columns": r["columns"], "rows": r["rows"], "uploaded_at": r["uploaded_at"],
-         "mine": r["user_id"] == user["id"], "owner": r["owner_name"]}
+         "mine": r["user_id"] == user["id"], "owner": r["owner_name"], "source": r.get("source") or "upload"}
         for r in rows
     ]}
 
@@ -630,6 +640,263 @@ def _dataset_summary(rows: list[dict], max_rows: int = 30) -> str:
         lines = [",".join(map(str, cols))] + [",".join("" if v is None else str(v) for v in r) for r in body]
         parts.append(f"Dataset '{d['name']}' (last {len(body)} rows):\n" + "\n".join(lines))
     return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------- Roblox Analytics sync
+# Game owners paste an Open Cloud API key with universe.analytics:read. We pull the same
+# numbers the Creator Dashboard shows and store them as datasets, so no CSV exports are needed.
+# Roblox's own data runs a few hours behind, so the cron re-syncs every few hours.
+
+ANALYTICS_URL = "https://apis.roblox.com/analytics-query-api"
+SYNC_DAYS = 90
+SYNC_EVERY_HOURS = 6
+
+
+class SyncError(Exception):
+    def __init__(self, msg: str, bad_key: bool = False):
+        super().__init__(msg)
+        self.bad_key = bad_key
+
+
+def _fernet():
+    from cryptography.fernet import Fernet
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(("rostats-roblox-keys:" + SESSION_SECRET).encode()).digest()))
+
+
+def _dim_label(b) -> str:
+    if isinstance(b, dict):
+        for k in ("value", "dimensionValue", "label", "name"):
+            if isinstance(b.get(k), (str, int, float, bool)):
+                return str(b[k])
+        vals = [v for v in b.values() if isinstance(v, (str, int, float, bool))]
+        return str(vals[-1]) if vals else ""
+    return str(b)
+
+
+async def _query(c: httpx.AsyncClient, key: str, universe_id: int, metric: str, start: dt.date, end: dt.date,
+                 breakdown: list[str] | None = None) -> list[dict]:
+    body: dict = {"metric": metric, "granularity": "OneDay",
+                  "startTime": f"{start.isoformat()}T00:00:00Z", "endTime": f"{end.isoformat()}T00:00:00Z"}
+    if breakdown:
+        body["breakdown"] = breakdown
+    h = {"x-api-key": key}
+    r = await c.post(f"{ANALYTICS_URL}/v1/universes/{universe_id}/metrics", headers=h, json=body)
+    if r.status_code in (401, 403):
+        raise SyncError("Roblox refused the API key. Check that it has universe.analytics:read for this experience.", bad_key=True)
+    if r.status_code == 429:
+        raise SyncError("Roblox rate limit, try again in a few minutes")
+    if r.status_code >= 400:
+        raise SyncError(f"{metric}: Roblox returned {r.status_code}")
+    op = r.json()
+    for _ in range(12):
+        if op.get("done"):
+            break
+        await asyncio.sleep(1.5)
+        pr = await c.get(f"{ANALYTICS_URL}/{op['path'].lstrip('/')}", headers=h)
+        if pr.status_code >= 400:
+            raise SyncError(f"{metric}: Roblox returned {pr.status_code}")
+        op = pr.json()
+    if not op.get("done"):
+        raise SyncError(f"{metric}: Roblox took too long")
+    if op.get("error"):
+        raise SyncError(f"{metric}: {str(op['error'])[:120]}")
+    out = []
+    for v in (op.get("response") or {}).get("values") or []:
+        pts = {str(p.get("time", ""))[:10]: p.get("value") for p in v.get("dataPoints") or [] if p.get("value") is not None}
+        out.append({"labels": [_dim_label(b) for b in v.get("breakdowns") or []], "points": pts})
+    return out
+
+
+def _as_pct(series: dict) -> dict:
+    vals = [float(v) for v in series.values()]
+    scale = 100 if vals and max(vals) <= 1 else 1
+    return {d: f"{round(float(v) * scale, 2)}%" for d, v in series.items()}
+
+
+def _table(name: str, cols: dict) -> dict | None:
+    cols = {k: v for k, v in cols.items() if v}
+    if not cols:
+        return None
+    dates = sorted({d for s in cols.values() for d in s})
+    fix = lambda v: round(v, 2) if isinstance(v, float) else v
+    rows = [[d] + [fix(cols[k].get(d)) for k in cols] for d in dates]
+    return {"name": name, "columns": ["Date", *cols.keys()], "rows": rows}
+
+
+async def _pull_analytics(key: str, universe_id: int, days: int = SYNC_DAYS) -> tuple[list[dict], list[str]]:
+    end = dt.datetime.now(dt.timezone.utc).date()
+    start = end - dt.timedelta(days=days)
+    jobs = {
+        "dau": ("DailyActiveUsers", None), "new": ("DailyActiveUsers", ["IsNewUser"]), "visits": ("Visits", None),
+        "session": ("AverageSessionLengthMinutes", None), "playtime": ("TotalPlayTimeHours", None),
+        "ccu": ("PeakConcurrentPlayers", None),
+        "d1": ("ForwardD1Retention", None), "d7": ("ForwardD7Retention", None), "d30": ("ForwardD30Retention", None),
+        "rev": ("DailyRevenue", None), "src": ("DailyRevenue", ["RevenueSource"]),
+        "payers": ("PayingUsers", None), "cvr": ("PayingUsersCVR", None), "arppu": ("AverageRevenuePerPayingUser", None),
+    }
+    sem = asyncio.Semaphore(4)
+    async with httpx.AsyncClient(timeout=20) as c:
+        async def run(k, m, bd):
+            async with sem:
+                try:
+                    return k, await _query(c, key, universe_id, m, start, end, bd), None
+                except SyncError as e:
+                    if e.bad_key:
+                        raise
+                    return k, [], str(e)
+                except httpx.HTTPError:
+                    return k, [], f"{m}: could not reach Roblox"
+        results = await asyncio.gather(*(run(k, m, bd) for k, (m, bd) in jobs.items()))
+    got = {k: v for k, v, _ in results}
+    errors = [e for _, _, e in results if e]
+
+    def one(k):
+        v = got.get(k) or []
+        return v[0]["points"] if v else {}
+
+    new_users = next((v["points"] for v in got.get("new", []) if [x.lower() for x in v["labels"]] in (["true"], ["new"], ["1"])), {})
+    sources: dict = {}
+    for v in sorted(got.get("src", []), key=lambda v: -sum(float(x) for x in v["points"].values())):
+        label = (v["labels"][0] if v["labels"] else "Other").replace("_", " ").strip().title() or "Other"
+        if len(sources) < 5 and v["points"]:
+            sources[label] = v["points"]
+    tables = [
+        _table("Daily active users", {"Daily active users": one("dau"), "New users": new_users, "Visits": one("visits")}),
+        _table("Engagement", {"Average session (minutes)": one("session"), "Play time (hours)": one("playtime"),
+                              "Peak concurrent players": one("ccu")}),
+        _table("Retention", {"D1 retention": _as_pct(one("d1")), "D7 retention": _as_pct(one("d7")),
+                             "D30 retention": _as_pct(one("d30"))}),
+        _table("Robux revenue", sources or {"Robux earned": one("rev")}),
+        _table("Paying users", {"Paying users": one("payers"), "Payer conversion": _as_pct(one("cvr")),
+                                "Robux per payer": one("arppu")}),
+    ]
+    return [t for t in tables if t], errors
+
+
+def _set_link_error(conn, link: dict, msg: str | None):
+    conn.execute("update roblox_links set last_error = %s where user_id = %s and universe_id = %s",
+                 (msg, link["user_id"], link["universe_id"]))
+
+
+async def _sync_link(conn, link: dict) -> dict:
+    user = conn.execute("select * from users where id = %s", (link["user_id"],)).fetchone()
+    try:
+        key = _fernet().decrypt(link["key_enc"].encode()).decode()
+        tables, errors = await _pull_analytics(key, int(link["universe_id"]))
+    except SyncError as e:
+        _set_link_error(conn, link, str(e))
+        raise
+    if not tables:
+        msg = errors[0] if errors else "Roblox returned no data for this experience yet"
+        _set_link_error(conn, link, msg)
+        raise SyncError(msg)
+    pro = bool(user) and is_pro(user)
+    with conn.transaction():
+        conn.execute("delete from datasets where user_id = %s and universe_id = %s and source = 'roblox'",
+                     (link["user_id"], link["universe_id"]))
+        for t in tables:
+            rows = t["rows"] if pro else t["rows"][-7:]
+            conn.execute(
+                "insert into datasets (user_id, universe_id, name, columns, rows, source) values (%s, %s, %s, %s, %s, 'roblox')",
+                (link["user_id"], link["universe_id"], t["name"], Jsonb(t["columns"]), Jsonb(rows)),
+            )
+        conn.execute("update roblox_links set last_sync = now(), last_error = %s where user_id = %s and universe_id = %s",
+                     ("; ".join(errors)[:300] or None, link["user_id"], link["universe_id"]))
+    return {"datasets": [t["name"] for t in tables], "skipped": errors}
+
+
+def _link_status(conn, uid: int, universe_id: int) -> dict:
+    r = conn.execute("select created_at, last_sync, last_error from roblox_links where user_id = %s and universe_id = %s",
+                     (uid, universe_id)).fetchone()
+    if not r:
+        return {"connected": False}
+    return {"connected": True, "connected_at": r["created_at"], "last_sync": r["last_sync"],
+            "last_error": r["last_error"], "every_hours": SYNC_EVERY_HOURS}
+
+
+class SyncConnectIn(BaseModel):
+    universe_id: str
+    api_key: str = Field(min_length=20, max_length=4000)
+
+
+class SyncRunIn(BaseModel):
+    universe_id: str
+
+
+def _own_game(conn, uid: int, universe_id: str) -> int:
+    gid = int(universe_id)
+    if not conn.execute("select 1 from games where user_id = %s and universe_id = %s", (uid, gid)).fetchone():
+        raise HTTPException(403, "Only the person who added this game can connect it")
+    return gid
+
+
+@app.get("/api/sync")
+async def sync_status(universe_id: str, user: dict = Depends(current_user)):
+    with db() as conn:
+        return _link_status(conn, user["id"], int(universe_id))
+
+
+@app.post("/api/sync/connect")
+async def sync_connect(body: SyncConnectIn, user: dict = Depends(current_user)):
+    if not SESSION_SECRET:
+        raise HTTPException(503, "Server is missing SESSION_SECRET")
+    with db() as conn:
+        gid = _own_game(conn, user["id"], body.universe_id)
+        conn.execute(
+            """insert into roblox_links (user_id, universe_id, key_enc) values (%s, %s, %s)
+               on conflict (user_id, universe_id) do update set key_enc = excluded.key_enc, last_error = null""",
+            (user["id"], gid, _fernet().encrypt(body.api_key.strip().encode()).decode()),
+        )
+        link = conn.execute("select * from roblox_links where user_id = %s and universe_id = %s", (user["id"], gid)).fetchone()
+        try:
+            result = await _sync_link(conn, link)
+        except SyncError as e:
+            if e.bad_key:
+                conn.execute("delete from roblox_links where user_id = %s and universe_id = %s", (user["id"], gid))
+            raise HTTPException(400, str(e))
+        return {**result, **_link_status(conn, user["id"], gid)}
+
+
+@app.post("/api/sync/run")
+async def sync_run(body: SyncRunIn, user: dict = Depends(current_user)):
+    with db() as conn:
+        gid = _own_game(conn, user["id"], body.universe_id)
+        link = conn.execute("select * from roblox_links where user_id = %s and universe_id = %s", (user["id"], gid)).fetchone()
+        if not link:
+            raise HTTPException(404, "This game is not connected")
+        if link["last_sync"] and (dt.datetime.now(dt.timezone.utc) - link["last_sync"]).total_seconds() < 600:
+            raise HTTPException(429, "Synced less than 10 minutes ago. Roblox only updates its numbers every few hours.")
+        try:
+            result = await _sync_link(conn, link)
+        except SyncError as e:
+            raise HTTPException(400, str(e))
+        return {**result, **_link_status(conn, user["id"], gid)}
+
+
+@app.delete("/api/sync")
+async def sync_disconnect(universe_id: str, user: dict = Depends(current_user)):
+    gid = int(universe_id)
+    with db() as conn:
+        conn.execute("delete from roblox_links where user_id = %s and universe_id = %s", (user["id"], gid))
+        conn.execute("delete from datasets where user_id = %s and universe_id = %s and source = 'roblox'", (user["id"], gid))
+    return {"ok": True}
+
+
+async def _sync_stale(limit: int = 3) -> dict:
+    done, failed = 0, 0
+    with db() as conn:
+        links = conn.execute(
+            f"""select * from roblox_links
+                where last_sync is null or last_sync < now() - interval '{SYNC_EVERY_HOURS} hours'
+                order by last_sync nulls first limit %s""", (limit,)
+        ).fetchall()
+        for link in links:
+            try:
+                await _sync_link(conn, link)
+                done += 1
+            except SyncError:
+                failed += 1
+    return {"synced": done, "failed": failed}
 
 
 # ---------------------------------------------------------------- Gemini text
@@ -1625,7 +1892,12 @@ def _growth(conn, ids: list[int] | None = None) -> dict[int, dict]:
 @app.post("/api/market/snapshot")
 @app.get("/api/market/snapshot")
 async def market_snapshot():
-    return await _take_snapshot()
+    out = await _take_snapshot()
+    try:
+        out = {**out, "analytics_sync": await _sync_stale()}
+    except Exception as e:  # a sync problem must never break the market snapshot
+        out = {**out, "analytics_sync_error": str(e)[:200]}
+    return out
 
 
 @app.get("/api/market/categories")
