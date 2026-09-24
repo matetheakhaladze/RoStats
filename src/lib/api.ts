@@ -78,7 +78,9 @@ export type Dataset = {
   uploaded_at: string
   mine?: boolean
   owner?: string
+  source?: 'upload' | 'roblox'
 }
+export type SyncStatus = { connected: boolean; connected_at?: string; last_sync?: string | null; last_error?: string | null; every_hours?: number; datasets?: string[]; skipped?: string[] }
 export type TeamMember = { id: string; name: string; display_name: string | null; picture: string | null; role: string }
 export type TeamGame = { universe_id: string; place_id: string; name: string; added_by: string; added_by_name: string }
 export type Team = { id: string; name: string; owner_id: string; role: string; invite_code: string; members: TeamMember[]; games: TeamGame[] }
@@ -131,6 +133,10 @@ export const api = {
   addDataset: (d: { name: string; universe_id?: string; columns: string[]; rows: (string | number | null)[][] }) =>
     post<{ id: number; rows_saved: number; trimmed: boolean }>('/api/datasets', d),
   deleteDataset: (id: number) => del<{ deleted: boolean }>(`/api/datasets/${id}`),
+  syncStatus: (universeId: string) => request<SyncStatus>(`/api/sync?universe_id=${universeId}`),
+  syncConnect: (universeId: string, apiKey: string) => post<SyncStatus>('/api/sync/connect', { universe_id: universeId, api_key: apiKey }),
+  syncRun: (universeId: string) => post<SyncStatus>('/api/sync/run', { universe_id: universeId }),
+  syncDisconnect: (universeId: string) => del<{ ok: boolean }>(`/api/sync?universe_id=${universeId}`),
 
   chat: (body: { messages: { role: 'user' | 'assistant'; content: string }[]; universe_id?: string; include_data: boolean; notes?: string }) =>
     post<{ reply: string }>('/api/chat', body),

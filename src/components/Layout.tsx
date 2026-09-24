@@ -4,7 +4,6 @@ import {
   LayoutDashboard, Users, Coins, TrendingUp, Image, MessageSquare, Upload,
   Settings, CreditCard, Menu, X, ChevronDown, LogOut, Plus, FileText, Kanban, UsersRound, Sparkles,
 } from 'lucide-react'
-import logoUrl from '../assets/logo.png'
 import { useAuth } from '../lib/auth'
 import { loginUrl } from '../lib/api'
 import { Spinner } from './data'
@@ -30,10 +29,21 @@ const nav = [
   ]},
 ]
 
+export function LogoMark({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="8" fill="var(--accent-fill)" />
+      <rect x="7" y="17" width="4" height="8" rx="1.2" fill="var(--on-accent)" />
+      <rect x="14" y="12" width="4" height="13" rx="1.2" fill="var(--on-accent)" />
+      <rect x="21" y="7" width="4" height="18" rx="1.2" fill="var(--on-accent)" />
+    </svg>
+  )
+}
+
 export function Logo({ size = 28 }: { size?: number }) {
   return (
     <span className="inline-flex items-center gap-2 font-semibold">
-      <img src={logoUrl} width={size} height={size} alt="" />
+      <LogoMark size={size} />
       RoStats
     </span>
   )

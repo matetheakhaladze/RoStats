@@ -92,7 +92,7 @@ export function matches(d: Dataset, re: RegExp) {
   return re.test(d.name) || d.columns.some((c) => re.test(c))
 }
 
-export const SERIES_COLORS = ['var(--accent)', 'var(--violet)', 'var(--good)', 'var(--warn)', 'var(--bad)', '#22d3ee']
+export const SERIES_COLORS = ['var(--accent)', 'var(--orange)', 'var(--sky)', 'var(--pink)', 'var(--good)', 'var(--warn)']
 
 // True when the first column holds dates, so the file is a daily or weekly series.
 export function isTimeSeries(d: Dataset) {

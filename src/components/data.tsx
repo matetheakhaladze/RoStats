@@ -142,7 +142,7 @@ export function InsightsCard({ focus, datasetIds }: { focus: 'overview' | 'playe
   }
 
   const lines = text?.split('\n').map((l) => l.replace(/^[-*•\d.\s]+/, '').trim()).filter(Boolean) ?? []
-  const dots = ['bg-warn', 'bg-accent', 'bg-good', 'bg-violet', 'bg-bad']
+  const dots = ['bg-warn', 'bg-accent', 'bg-good', 'bg-orange', 'bg-bad']
   return (
     <div className="card flex h-full flex-col p-5">
       <div className="mb-4 flex items-center gap-2">

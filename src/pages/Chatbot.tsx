@@ -73,7 +73,7 @@ export default function Chatbot() {
             {msgs.map((m, i) => (
               <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : ''}`}>
                 {m.role === 'assistant' && <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent"><Sparkles size={14} /></div>}
-                <div className={`max-w-[75%] whitespace-pre-line rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent text-white' : m.error ? 'rounded-bl-md bg-bad-soft text-bad' : 'rounded-bl-md bg-panel-2'}`}>{m.text}</div>
+                <div className={`max-w-[75%] whitespace-pre-line rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${m.role === 'user' ? 'rounded-br-md bg-accent-fill text-on-accent' : m.error ? 'rounded-bl-md bg-bad-soft text-bad' : 'rounded-bl-md bg-panel-2'}`}>{m.text}</div>
               </div>
             ))}
             {typing && (

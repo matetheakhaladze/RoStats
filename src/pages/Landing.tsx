@@ -210,7 +210,7 @@ export default function Landing() {
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {steps.map((s) => (
               <div key={s.n} className="card p-6">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-sm font-semibold text-white">{s.n}</div>
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-fill text-sm font-semibold text-on-accent">{s.n}</div>
                 <h3 className="mt-4 font-semibold">{s.title}</h3>
                 <p className="mt-2 text-sm text-muted">{s.text}</p>
               </div>

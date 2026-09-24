@@ -17,7 +17,7 @@ function Avatar({ m, size = 'h-6 w-6' }: { m?: TeamMember; size?: string }) {
   if (!m) return null
   return m.picture
     ? <img src={m.picture} alt={m.name} title={m.display_name || m.name} className={`${size} rounded-full bg-panel-2`} />
-    : <div title={m.name} className={`${size} rounded-full bg-accent text-[10px] font-semibold text-white flex items-center justify-center`}>{m.name.slice(0, 2).toUpperCase()}</div>
+    : <div title={m.name} className={`${size} rounded-full bg-accent-fill text-[10px] font-semibold text-on-accent flex items-center justify-center`}>{m.name.slice(0, 2).toUpperCase()}</div>
 }
 
 function dueTone(due: string | null, done: boolean) {
