@@ -50,6 +50,7 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 ROBLOX_CLIENT_ID = os.environ.get("ROBLOX_CLIENT_ID", "")
 ROBLOX_CLIENT_SECRET = os.environ.get("ROBLOX_CLIENT_SECRET", "")
 PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "https://rostats-api.vercel.app").rstrip("/")
+SITE_URL = os.environ.get("SITE_URL", "https://matetheakhaladze.github.io/RoStats/")
 ALLOWED_RETURN_ORIGINS = [
     o.strip().rstrip("/")
     for o in os.environ.get(
@@ -308,11 +309,11 @@ def _allowed_return(url: str) -> bool:
 
 
 @app.get("/api/auth/login")
-async def auth_login(return_to: str):
+async def auth_login(return_to: str = ""):
     if not (ROBLOX_CLIENT_ID and ROBLOX_CLIENT_SECRET):
         raise HTTPException(503, "Roblox sign in is not configured yet")
-    if not _allowed_return(return_to):
-        raise HTTPException(400, "return_to is not an allowed site")
+    if not return_to or not _allowed_return(return_to):
+        return_to = SITE_URL
     state = secrets.token_urlsafe(24)
     verifier = secrets.token_urlsafe(48)
     challenge = _b64e(hashlib.sha256(verifier.encode()).digest())
@@ -335,7 +336,7 @@ async def auth_login(return_to: str):
 async def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     data = unsign(request.cookies.get("rs_oauth", ""))
     if not data or data.get("typ") != "oauth":
-        raise HTTPException(400, "Sign in expired, try again")
+        return RedirectResponse(f"{SITE_URL}#/auth/callback?" + urlencode({"error": "Sign in expired, please try again"}), status_code=302)
     back = data["r"]
     if error or not code or state != data["state"]:
         why = error or ("no_code" if not code else "state_mismatch")
